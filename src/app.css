@@ -1,0 +1,149 @@
+/* LIMKETMON design system.
+   Direction: near-black "card table" surface, single warm gold accent,
+   system type (Korean-first), restrained glass — the cards are the hero. */
+
+:root {
+	--bg: #101014;
+	--bg-raised: #17171d;
+	--bg-panel: rgba(255, 255, 255, 0.04);
+	--line: rgba(255, 255, 255, 0.09);
+	--text: #ececf1;
+	--text-dim: #9a9aa6;
+	--accent: #e8b64c;
+	--accent-deep: #b8862a;
+	--danger: #e05d5d;
+
+	--gold-hi: #ffd98a;
+	--r-N: #a8a8b4;
+	--r-R: #6fb1e0;
+	--r-SR: #b17fe0;
+	--r-SSR: #e8b64c;
+	--r-UR: #ff7a45;
+
+	--radius: 14px;
+	--font: system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html {
+	background: var(--bg);
+	color-scheme: dark;
+}
+
+body {
+	margin: 0;
+	font-family: var(--font);
+	color: var(--text);
+	background: var(--bg);
+	min-height: 100dvh;
+	-webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+	letter-spacing: -0.02em;
+	line-height: 1.15;
+	margin: 0;
+}
+
+a { color: inherit; }
+
+button {
+	font: inherit;
+	color: inherit;
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 6px;
+}
+
+.page {
+	max-width: 720px;
+	margin: 0 auto;
+	padding: 24px 20px 96px;
+}
+
+.panel {
+	background: rgba(255, 255, 255, 0.035);
+	border: 1px solid var(--line);
+	border-radius: 16px;
+}
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 13px 22px;
+	border-radius: 12px;
+	border: 1px solid var(--line);
+	background: rgba(255, 255, 255, 0.06);
+	font-weight: 700;
+	font-size: 1rem;
+	cursor: pointer;
+	transition: transform 100ms ease-out, background 150ms ease-out, border-color 150ms ease-out;
+	touch-action: manipulation;
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
+}
+.btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+.btn:active { transform: scale(0.97); }
+.btn:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+	transform: none;
+}
+
+.btn-primary {
+	background: var(--accent);
+	border-color: transparent;
+	color: #1f1602;
+}
+.btn-primary:hover:not(:disabled) {
+	background: #f0c25f;
+	filter: none;
+}
+
+.btn.ghost {
+	background: transparent;
+	color: var(--text);
+}
+
+.field {
+	width: 100%;
+	padding: 13px 14px;
+	border-radius: 10px;
+	border: 1px solid var(--line);
+	background: rgba(0, 0, 0, 0.3);
+	color: var(--text);
+	font-size: 1rem;
+}
+.field::placeholder { color: var(--text-dim); }
+
+.form-error {
+	color: var(--danger);
+	font-size: 0.9rem;
+	min-height: 1.3em;
+	margin: 8px 0 0;
+}
+
+.sr-only {
+	position: absolute;
+	width: 1px; height: 1px;
+	padding: 0; margin: -1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
