@@ -8,3 +8,5 @@ node_modules
 /package
 vite.config.ts.timestamp-*
 .playwright-mcp/
+/test-results/
+/playwright-report/

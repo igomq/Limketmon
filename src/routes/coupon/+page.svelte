@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 
-	let { form } = $props();
+	let { data, form } = $props();
 	let code = $state('');
 	let submitting = $state(false);
 </script>
@@ -18,10 +18,13 @@
 		method="POST"
 		use:enhance={() => {
 			submitting = true;
-			return async ({ update }) => {
-				submitting = false;
-				await update();
-				code = '';
+			return async ({ update, result }) => {
+				try {
+					await update();
+					if (result.type === 'success') code = '';
+				} finally {
+					submitting = false;
+				}
 			};
 		}}
 	>
@@ -36,20 +39,23 @@
 			autocapitalize="characters"
 			spellcheck="false"
 			bind:value={code}
+			aria-describedby="coupon-feedback"
 		/>
 		<button class="btn btn-primary w" type="submit" disabled={submitting}>
 			{submitting ? '확인 중…' : '등록'}
 		</button>
 	</form>
 
+	<div id="coupon-feedback" class="feedback" aria-live="polite">
 	{#if form?.success}
-		<p class="ok" role="status">쿠폰 등록 완료! 뽑기권 +{form.credits}</p>
+		<p class="ok">쿠폰 등록 완료 · 뽑기권 +100</p>
 	{:else if form?.error}
-		<p class="form-error" role="alert">{form.error}</p>
+		<p class="form-error">{form.error}</p>
 	{/if}
+	</div>
 
 	<section class="panel have">
-		현재 보유 뽑기권 <b>{form?.credits ?? 0}</b>
+		현재 보유 뽑기권 <b>{form?.credits ?? data.credits}</b>
 	</section>
 </div>
 
@@ -66,6 +72,8 @@
 		font-weight: 700;
 		text-align: center;
 	}
+	.feedback { min-height: 1.5rem; margin-top: 10px; text-align: center; }
+	.feedback p { margin: 0; }
 	.have {
 		margin-top: 24px;
 		padding: 16px;

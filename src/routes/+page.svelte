@@ -34,7 +34,7 @@
 			</div>
 		</dl>
 		<div class="bar" role="progressbar" aria-label="도감 완성도" aria-valuenow={data.completion} aria-valuemin={0} aria-valuemax={100}>
-			<div class="fill" style="width: {data.completion}%"></div>
+			<div class="fill" style={`--progress: ${data.completion / 100}`}></div>
 		</div>
 	</section>
 
@@ -105,7 +105,7 @@
 		letter-spacing: -0.01em;
 	}
 	.stats dd.ok { color: var(--accent); }
-	.dim { color: var(--text-dim); font-size: 0.8rem; font-weight: 600; }
+	.dim { margin-left: .28em; color: var(--text-dim); font-size: 0.8rem; font-weight: 600; }
 
 	.bar {
 		height: 4px;
@@ -114,10 +114,13 @@
 		overflow: hidden;
 	}
 	.fill {
+		width: 100%;
 		height: 100%;
 		background: var(--accent);
 		border-radius: inherit;
-		transition: width 400ms ease-out;
+		transform: scaleX(var(--progress));
+		transform-origin: left;
+		transition: transform 400ms ease-out;
 	}
 
 	.actions {

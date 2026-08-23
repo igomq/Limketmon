@@ -21,8 +21,11 @@
 			use:enhance={() => {
 				submitting = true;
 				return async ({ update }) => {
-					submitting = false;
-					await update();
+					try {
+						await update();
+					} finally {
+						submitting = false;
+					}
 				};
 			}}
 		>
@@ -54,6 +57,9 @@
 		display: grid;
 		gap: 20px;
 		justify-items: center;
+	}
+	@media (max-height: 620px) {
+		.auth { padding-top: 24px; }
 	}
 	.auth-card {
 		width: 100%;

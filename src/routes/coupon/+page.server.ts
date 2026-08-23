@@ -23,7 +23,10 @@ export const actions: Actions = {
 			return { success: true, credits, error: '' };
 		} catch (e) {
 			if (e instanceof ServiceError) {
-				return fail(400, { error: e.message, credits: 0 });
+				return fail(400, {
+					error: e.message,
+					credits: (await repos.game.getGameState(locals.user.id)).pullCredits
+				});
 			}
 			throw e;
 		}

@@ -48,4 +48,12 @@ describe('auth', () => {
 		await repos.auth.deleteSession(token);
 		expect(await getUserFromSession(repos, token)).toBeNull();
 	});
+
+	it('rejects expired sessions', async () => {
+		const repos = makeRepos();
+		const user = await signup(repos, 'expired@b.com', 'password123');
+		const session = await repos.auth.createSession(user.id, '2000-01-01T00:00:00.000Z');
+		expect(await getUserFromSession(repos, session.token)).toBeNull();
+		expect(await repos.auth.getSession(session.token)).toBeNull();
+	});
 });

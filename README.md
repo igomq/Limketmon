@@ -19,6 +19,7 @@ pnpm dev          # http://localhost:5173
 | `pnpm dev` | 개발 서버 |
 | `pnpm check` | svelte-check 타입 검사 |
 | `pnpm test` | Vitest 단위 테스트 |
+| `pnpm test:e2e` | Playwright 사용자 흐름·모바일·시각 회귀 테스트 |
 | `pnpm build` | 프로덕션 빌드 |
 | `pnpm preview` | 빌드 결과 미리보기 |
 
@@ -56,6 +57,7 @@ pnpm test
 
 auth(가입/로그인/세션), KST 무료 뽑기 리셋, 뽑기권 소비/중복 quantity, 쿠폰 중복/계정 격리,
 카드 manifest determinism 을 커버한다. 시간은 injectable `Clock`, 랜덤은 injectable `Rand`로 주입된다.
+Playwright는 `E2E=true`인 로컬 테스트 서버에서만 고정 랜덤을 사용하며 production 랜덤 경로는 유지한다.
 
 ## 배포 (ChatGPT Sites)
 

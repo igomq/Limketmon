@@ -24,7 +24,7 @@
 			const res = await fetch('/api/pull', { method: 'POST' });
 			const body = await res.json();
 			if (!res.ok) throw new Error(body.message ?? '뽑기에 실패했습니다.');
-			invalidateAll();
+			await invalidateAll();
 			return body;
 		}}
 		onexit={() => goto('/collection')}
@@ -38,6 +38,7 @@
 		align-items: center;
 		gap: 10px;
 		margin-bottom: 8px;
+		flex-wrap: wrap;
 	}
 	h1 { font-size: 1.3rem; }
 	.chips { display: flex; gap: 8px; }
@@ -53,5 +54,10 @@
 	.chip.ok {
 		color: var(--accent);
 		border-color: rgba(232, 182, 76, 0.45);
+	}
+	@media (max-width: 350px) {
+		.head { align-items: flex-start; }
+		.chips { gap: 5px; }
+		.chip { padding-inline: 9px; font-size: .72rem; }
 	}
 </style>

@@ -20,8 +20,11 @@
 			use:enhance={() => {
 				submitting = true;
 				return async ({ update }) => {
-					submitting = false;
-					await update();
+					try {
+						await update();
+					} finally {
+						submitting = false;
+					}
 				};
 			}}
 		>
@@ -78,4 +81,7 @@
 	.swap { color: var(--text-dim); font-size: 0.85rem; }
 	.swap a { color: var(--text); text-decoration: none; font-weight: 600; }
 	.swap a:hover { text-decoration: underline; }
+	@media (max-height: 620px) {
+		.auth { padding-top: 24px; }
+	}
 </style>
