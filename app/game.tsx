@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import type { Card, Snapshot } from '../lib/game';
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
+import type { Card, PullResult, Snapshot } from '../lib/game';
+import { rarityRank } from '../lib/rules';
 
 type Tab = 'home' | 'pull' | 'collection' | 'coupon';
 
@@ -16,7 +17,7 @@ export default function Game({
 }) {
   const [tab, setTab] = useState<Tab>('home');
   const [snapshot, setSnapshot] = useState(initial);
-  const [result, setResult] = useState<{ card: Card; isNew: boolean; quantity: number } | null>(null);
+  const [results, setResults] = useState<PullResult[]>([]);
   const [selected, setSelected] = useState<Card | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -24,22 +25,28 @@ export default function Game({
     () => new Map(snapshot.inventory.map((item) => [item.cardId, item])),
     [snapshot.inventory]
   );
+  const sortedCards = useMemo(
+    () => [...cards].sort((a, b) => rarityRank(a.rarity) - rarityRank(b.rarity) || a.version - b.version),
+    [cards]
+  );
 
-  async function pull() {
+  async function pull(count: 1 | 5) {
     setBusy(true);
     setMessage('');
     try {
-      const response = await fetch('/api/pull', { method: 'POST' });
+      const response = await fetch('/api/pull', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ count })
+      });
       const data = (await response.json()) as {
         error?: string;
         snapshot: Snapshot;
-        card: Card;
-        isNew: boolean;
-        quantity: number;
+        results: PullResult[];
       };
       if (!response.ok) throw new Error(data.error ?? '뽑기에 실패했습니다.');
       setSnapshot(data.snapshot);
-      setResult({ card: data.card, isNew: data.isNew, quantity: data.quantity });
+      setResults(data.results);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '뽑기에 실패했습니다.');
     } finally {
@@ -119,15 +126,38 @@ export default function Game({
           <section className="pull-view">
             <h1>오늘의 카드팩</h1>
             <p className="muted">매일 자정(KST)에 무료 뽑기가 충전됩니다.</p>
-            {result ? (
-              <CardView card={result.card} quantity={result.quantity} onClick={() => setSelected(result.card)} featured />
+            {results.length ? (
+              <div className={`pull-results ${results.length === 1 ? 'single' : 'multi'}`} aria-live="polite">
+                {results.map((result, index) => (
+                  <PullReveal
+                    key={`${result.card.id}-${result.quantity}-${index}`}
+                    result={result}
+                    index={index}
+                    single={results.length === 1}
+                    onClick={() => setSelected(result.card)}
+                  />
+                ))}
+              </div>
             ) : (
               <div className="pack" aria-hidden="true"><span>L</span><b>LIMKETMON</b><small>MYSTERY CARD</small></div>
             )}
-            {result && <p className="result-copy">{result.isNew ? 'NEW! 도감에 새 카드가 추가됐습니다.' : `중복 카드 · 보유 ×${result.quantity}`}</p>}
-            <button className="btn btn-primary pull-button" disabled={busy} onClick={pull}>
-              {busy ? '여는 중…' : result ? '한 번 더 뽑기' : snapshot.freeAvailable ? '무료로 열기' : `뽑기권 사용 (${snapshot.credits})`}
-            </button>
+            {results.length > 0 && <p className="result-copy">{pullSummary(results)}</p>}
+            <div className="pull-controls">
+              <button
+                className="btn btn-primary pull-button"
+                disabled={busy || (!snapshot.freeAvailable && snapshot.credits < 1)}
+                onClick={() => pull(1)}
+              >
+                {busy ? '여는 중…' : snapshot.freeAvailable ? '무료로 1장' : `1장 뽑기 · ${snapshot.credits}장`}
+              </button>
+              <button
+                className="btn pull-button"
+                disabled={busy || snapshot.credits < 5}
+                onClick={() => pull(5)}
+              >
+                5연속 뽑기 · 5장
+              </button>
+            </div>
             {message && <p className="notice error" role="alert">{message}</p>}
           </section>
         )}
@@ -135,11 +165,14 @@ export default function Game({
         {tab === 'collection' && (
           <section>
             <header className="section-head">
-              <h1>카드 도감</h1>
+              <div>
+                <h1>카드 도감</h1>
+                <p>등급 높은 순 · UR → N</p>
+              </div>
               <strong>{ownedCount}/{cards.length}</strong>
             </header>
             <div className="card-grid">
-              {cards.map((card) => {
+              {sortedCards.map((card) => {
                 const item = inventory.get(card.id);
                 return item ? (
                   <CardView key={card.id} card={card} quantity={item.quantity} onClick={() => setSelected(card)} />
@@ -179,6 +212,25 @@ function CardView({ card, quantity, onClick, featured = false }: { card: Card; q
       {quantity > 1 && <b className="quantity">×{quantity}</b>}
     </button>
   );
+}
+
+function PullReveal({ result, index, single, onClick }: { result: PullResult; index: number; single: boolean; onClick: () => void }) {
+  const high = rarityRank(result.card.rarity) <= rarityRank('SR');
+  return (
+    <div
+      className={`reveal-frame rarity-${result.card.rarity} ${high ? `high-${result.card.rarity}` : ''}`}
+      style={{ '--reveal-delay': `${index * 80}ms` } as CSSProperties}
+    >
+      <CardView card={result.card} quantity={result.quantity} onClick={onClick} featured={single} />
+    </div>
+  );
+}
+
+function pullSummary(results: PullResult[]): string {
+  const best = [...results].sort((a, b) => rarityRank(a.card.rarity) - rarityRank(b.card.rarity))[0]!;
+  const newCount = results.filter((result) => result.isNew).length;
+  if (results.length === 1) return best.isNew ? 'NEW! 도감에 새 카드가 추가됐습니다.' : `중복 카드 · 보유 ×${best.quantity}`;
+  return `최고 ${best.card.rarity} · 새 카드 ${newCount}장 · 총 ${results.length}장`;
 }
 
 function CardModal({ card, quantity, onClose }: { card: Card; quantity: number; onClose: () => void }) {

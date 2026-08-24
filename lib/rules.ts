@@ -1,5 +1,7 @@
 export type Rarity = 'N' | 'R' | 'SR' | 'SSR' | 'UR';
 
+export const RARITY_ORDER: Rarity[] = ['UR', 'SSR', 'SR', 'R', 'N'];
+
 const WEIGHTS: Array<[Rarity, number]> = [
   ['N', 0.5],
   ['R', 0.27],
@@ -24,4 +26,8 @@ export function rollRarity(roll: number): Rarity {
     if (roll < total) return rarity;
   }
   return 'N';
+}
+
+export function rarityRank(rarity: Rarity): number {
+  return RARITY_ORDER.indexOf(rarity);
 }
