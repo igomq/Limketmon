@@ -1,6 +1,6 @@
 /**
  * pnpm cards:sync
- * Scans ./images for supported photos, copies them into static/cards/ under a
+ * Scans ./images for supported photos, copies them into public/cards/ under a
  * stable versioned key, and appends new cards to the generated manifest.
  * Existing card metadata is never modified. Image conversion/editing never happens.
  * This is a build-time script — the only place node:fs is allowed.
@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url)); // scripts/
 const project = path.resolve(root, '..');
 const imagesDir = path.join(project, 'images');
-const outDir = path.join(project, 'static', 'cards');
+const outDir = path.join(project, 'public', 'cards');
 const manifestPath = path.join(project, 'src', 'lib', 'data', 'cards.generated.json');
 
 const SUPPORTED = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);

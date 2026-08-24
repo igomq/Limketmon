@@ -1,32 +1,37 @@
 {
-	"name": "limketmon",
-	"version": "0.1.0",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"dev": "vite dev",
-		"build": "vite build",
-		"preview": "vite preview",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"test": "vitest run",
-		"test:watch": "vitest",
-		"test:e2e": "playwright test",
-		"cards:sync": "node scripts/cards-sync.mjs"
-	},
-	"devDependencies": {
-		"@playwright/test": "^1.62.1",
-		"@sveltejs/adapter-auto": "^6.0.0",
-		"@sveltejs/kit": "^2.20.0",
-		"@sveltejs/vite-plugin-svelte": "^6.0.0",
-		"@types/node": "^24.0.0",
-		"svelte": "^5.30.0",
-		"svelte-check": "^4.2.0",
-		"typescript": "^5.8.0",
-		"vite": "^7.0.0",
-		"vitest": "^3.2.0"
-	},
-	"dependencies": {
-		"html-to-image": "^1.11.13"
-	}
+  "name": "limketmon",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "dev": "vinext dev",
+    "build": "vinext build",
+    "start": "vinext start",
+    "test": "node --test tests/sites-rules.test.ts",
+    "db:generate": "drizzle-kit generate",
+    "cards:sync": "node scripts/cards-sync.mjs"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.2",
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/workers-types": "4.20260515.1",
+    "@openai/sites-vite-plugin": "^0.2.0",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "drizzle-kit": "0.31.10",
+    "react-server-dom-webpack": "19.2.6",
+    "typescript": "5.9.3",
+    "vinext": "1.0.0-beta.3",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0"
+  }
 }

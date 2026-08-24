@@ -1,5 +1,8 @@
 # SITES_HANDOFF — ChatGPT Sites 배포 마이그레이션 가이드
 
+> 2026-08-24 마이그레이션 완료 전의 설계 기록이다. 현재 구현은 루트 `app/`, `lib/`, `db/`,
+> `.openai/hosting.json`과 README를 기준으로 한다.
+
 > 이 문서는 나중에 Codex에게 "이 프로젝트를 ChatGPT Sites에 배포 가능하게 만들어라"라고
 > 지시할 때 그대로 보여주는 문서다. 목표: **repository adapter + 배포 설정만 바꿔서 전체 앱을 재작성 없이 배포.**
 
@@ -83,7 +86,7 @@ pull_history     (id, user_id, card_id, rarity, pulled_at)
 
 ## 7. image 처리
 
-- 카드 이미지는 정적 asset: `static/cards/vNNN.ext` (`/cards/vNNN.ext`로 서빙).
+- 카드 이미지는 정적 asset: `public/cards/vNNN.ext` (`/cards/vNNN.ext`로 서빙).
 - DB/manifest는 **absolute URL이 아니라 image key**(`v023.jpg`)만 저장하고
   UI는 `resolveCardImage()` (`src/lib/cards.ts`)로 URL을 해석한다.
   → object storage 이전 시 이 함수(또는 서버 사이드 resolver)만 수정하면 됨.
