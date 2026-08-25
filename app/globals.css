@@ -115,6 +115,7 @@ h1, h2, p { margin-top: 0; }
 .card .rarity, .card-name, .quantity { position: absolute; z-index: 1; }
 .card .rarity { top: 9px; left: 9px; padding: 4px 7px; border-radius: 7px; background: rgba(8,8,12,.78); color: var(--rarity); font-size: .7rem; font-weight: 950; }
 .card-name { right: 10px; bottom: 10px; left: 10px; font-size: .8rem; font-weight: 800; line-height: 1.25; }
+.card-name small, .modal-copy h2 small { display: block; margin-top: 3px; color: var(--rarity); font-size: .82em; }
 .quantity { top: 9px; right: 9px; padding: 4px 7px; border-radius: 8px; background: var(--gold); color: #1c1302; font-size: .72rem; }
 .card.featured { width: min(70vw, 280px); margin: 34px auto 0; cursor: zoom-in; }
 .rarity-N { --rarity: #aaaab5; }

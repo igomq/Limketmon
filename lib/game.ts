@@ -1,6 +1,6 @@
 import 'server-only';
 import { getDatabase } from '../db/index';
-import manifest from './data/cards.generated.json';
+import manifest from './data/cards.curated.json';
 import type { Card } from './cards';
 import { kstDate, rollRarity, type Rarity } from './rules';
 

@@ -4,6 +4,7 @@ export interface Card {
   id: string;
   version: number;
   name: string;
+  alias?: string;
   rarity: Rarity;
   imageKey: string;
   skillName: string;
@@ -12,4 +13,5 @@ export interface Card {
   attack: number;
   defense: number;
   luck: number;
+  visualTags?: string[];
 }

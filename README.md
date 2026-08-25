@@ -6,7 +6,7 @@ Sign in with ChatGPT로 사용자를 식별하고 Cloudflare D1에 계정별 뽑
 ## 구성
 
 - `app/`: React 화면과 API Route
-- `lib/`: 게임 규칙, 카드 생성기, 카드 manifest
+- `lib/`: 게임 규칙과 수동 큐레이션 카드 manifest
 - `db/`: Drizzle 기반 D1 스키마와 바인딩
 - `drizzle/`: 로컬과 Sites 배포에 적용되는 SQL migration
 - `public/cards/`: 서비스에서 사용하는 카드 이미지
@@ -108,11 +108,12 @@ Git에서 제외됩니다.
 
 ```bash
 pnpm test
+pnpm check
 pnpm build
 ```
 
-- `pnpm test`: KST 날짜 경계, 희귀도 경계와 정렬, 카드 생성 결정성을 검사합니다. D1과 개발
-  서버는 필요하지 않습니다.
+- `pnpm test`: KST 날짜·뽑기 희귀도 경계, 이미지 매핑, 카드 metadata 유효성과 sync 안정성을 검사합니다.
+- `pnpm check`: TypeScript 타입을 검사합니다.
 - `pnpm build`: React/Vinext 타입과 번들, Workers 호환성, Sites 메타데이터와 migration 포함을
   검사합니다. 운영 D1에는 연결하지 않습니다.
 
@@ -126,11 +127,10 @@ pnpm build
 
 ## 카드 추가
 
-1. `images/`에 `.jpg`, `.jpeg`, `.png`, `.webp`, `.avif` 파일을 넣습니다.
-2. `pnpm cards:sync`를 실행합니다.
-3. 새 카드 metadata는 `lib/data/cards.generated.json`에 추가되고 이미지는 `public/cards/`로
-   복사됩니다.
-4. 기존 카드 metadata는 변경되지 않으므로 manifest와 새 이미지를 함께 커밋합니다.
+1. `images/`에 `.jpg`, `.jpeg`, `.png`, `.webp`, `.avif`, `.gif` 파일을 넣습니다.
+2. `pnpm cards:sync`를 실행해 다음 `limsingyu-vNNN.ext` 번호 제안을 확인합니다.
+3. 이미지를 직접 확인한 뒤 제안된 이름으로 rename하고 `lib/data/cards.curated.json`에 metadata를 추가합니다.
+4. 다시 sync해 검증하고 `public/cards/`에 원본 바이트 그대로 복사합니다. 기존 큐레이션 metadata는 변경되지 않습니다.
 
 ## 명령 요약
 
@@ -138,6 +138,7 @@ pnpm build
 | --- | --- |
 | `pnpm dev` | Sites 로그인과 로컬 D1을 포함한 개발 서버 |
 | `pnpm test` | DB가 필요 없는 Node 단위 테스트 |
+| `pnpm check` | TypeScript 타입 검사 |
 | `pnpm build` | Sites 배포용 production build |
 | `pnpm db:local:migrate` | 로컬 D1 migration 적용 |
 | `pnpm db:generate` | `db/schema.ts` 변경으로 migration 생성 |

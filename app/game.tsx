@@ -208,7 +208,7 @@ function CardView({ card, quantity, onClick, featured = false }: { card: Card; q
     <button className={`card rarity-${card.rarity} ${featured ? 'featured' : ''}`} onClick={onClick}>
       <img src={`/cards/${card.imageKey}`} alt="" />
       <span className="rarity">{card.rarity}</span>
-      <span className="card-name">{card.name}</span>
+      <span className="card-name">{card.name}{card.alias && <small>{card.alias}</small>}</span>
       {quantity > 1 && <b className="quantity">×{quantity}</b>}
     </button>
   );
@@ -247,7 +247,7 @@ function CardModal({ card, quantity, onClose }: { card: Card; quantity: number; 
         <img src={`/cards/${card.imageKey}`} alt={card.name} />
         <div className="modal-copy">
           <span className="rarity">{card.rarity}</span>
-          <h2>{card.name}</h2>
+          <h2>{card.name}{card.alias && <small>{card.alias}</small>}</h2>
           <p className="skill"><strong>{card.skillName}</strong><br />{card.skillDescription}</p>
           <p className="flavor">{card.flavorText}</p>
           <dl className="card-stats"><div><dt>ATK</dt><dd>{card.attack}</dd></div><div><dt>DEF</dt><dd>{card.defense}</dd></div><div><dt>LUCK</dt><dd>{card.luck}</dd></div></dl>
