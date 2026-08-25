@@ -14,12 +14,12 @@ const root = path.dirname(fileURLToPath(import.meta.url)); // scripts/
 const project = path.resolve(root, '..');
 const imagesDir = path.join(project, 'images');
 const outDir = path.join(project, 'public', 'cards');
-const manifestPath = path.join(project, 'src', 'lib', 'data', 'cards.generated.json');
+const manifestPath = path.join(project, 'lib', 'data', 'cards.generated.json');
 
 const SUPPORTED = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif']);
 
-// card-gen is a pure TS module; Node >= 23.6 strips types natively.
-const { generateCard, ensureRarityCoverage } = await import('../src/lib/card-gen.ts');
+// card-gen is a pure TS module; the supported Node runtime strips types natively.
+const { generateCard, ensureRarityCoverage } = await import('../lib/card-gen.ts');
 
 const files = (await readdir(imagesDir))
 	.filter((f) => SUPPORTED.has(path.extname(f).toLowerCase()))

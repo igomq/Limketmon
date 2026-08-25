@@ -3,7 +3,8 @@
  * Pure module — no fs, no time, no Math.random. Everything is derived from a seed
  * (the source image filename), so `cards:sync` is idempotent per image.
  */
-import type { CardDefinition, Rarity } from './cards.ts';
+import type { Card } from './cards.ts';
+import type { Rarity } from './rules.ts';
 
 export function hashSeed(str: string): number {
 	let h = 2166136261 >>> 0;
@@ -99,7 +100,7 @@ export interface GenerateCardInput {
 	sourceName: string;
 }
 
-export function generateCard({ version, imageKey, sourceName }: GenerateCardInput): CardDefinition {
+export function generateCard({ version, imageKey, sourceName }: GenerateCardInput): Card {
 	const rand = mulberry32(hashSeed(sourceName));
 	const rarity = rarityFromRoll(rand());
 
@@ -130,7 +131,7 @@ export function generateCard({ version, imageKey, sourceName }: GenerateCardInpu
  * is represented at least once, by promoting the highest-roll cards that are closest
  * to the missing thresholds. Deterministic for a fixed input set.
  */
-export function ensureRarityCoverage(cards: CardDefinition[]): void {
+export function ensureRarityCoverage(cards: Card[]): void {
 	if (cards.length < 5) return;
 	const order: Rarity[] = ['N', 'R', 'SR', 'SSR', 'UR'];
 	const missing = order.filter((r) => !cards.some((c) => c.rarity === r));

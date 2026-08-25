@@ -4,12 +4,8 @@ node_modules
 .env
 .env.*
 !.env.example
-.svelte-kit
 /.next
 /.vinext
 /.wrangler
 /package
 vite.config.ts.timestamp-*
-.playwright-mcp/
-/test-results/
-/playwright-report/

@@ -8,7 +8,8 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "node --test tests/sites-rules.test.ts",
+    "test": "node --test tests/card-gen.test.ts tests/sites-rules.test.ts",
+    "db:local:migrate": "WRANGLER_LOG_PATH=.wrangler/logs wrangler d1 migrations apply DB --local --config wrangler.local.jsonc",
     "db:generate": "drizzle-kit generate",
     "cards:sync": "node scripts/cards-sync.mjs"
   },

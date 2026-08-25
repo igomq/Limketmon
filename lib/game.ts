@@ -1,21 +1,10 @@
 import 'server-only';
 import { getDatabase } from '../db/index';
-import manifest from '../src/lib/data/cards.generated.json';
+import manifest from './data/cards.generated.json';
+import type { Card } from './cards';
 import { kstDate, rollRarity, type Rarity } from './rules';
 
-export interface Card {
-  id: string;
-  version: number;
-  name: string;
-  rarity: Rarity;
-  imageKey: string;
-  skillName: string;
-  skillDescription: string;
-  flavorText: string;
-  attack: number;
-  defense: number;
-  luck: number;
-}
+export type { Card } from './cards';
 
 export interface Snapshot {
   freeAvailable: boolean;
