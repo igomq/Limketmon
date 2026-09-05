@@ -5,7 +5,7 @@ import './globals.css';
 const origin = process.env.SITE_ORIGIN;
 
 export const metadata: Metadata = {
-  title: 'LIMKETMON — 신규는 한 명, 짤은 46종',
+  title: 'LIMKETMON — 임신규 카드 도감',
   description: '사진첩에만 두기 아까운 임신규의 표정들. 매일 한 장 무료로 뽑고, 46종의 신규를 모아보세요.',
   openGraph: {
     title: 'LIMKETMON',

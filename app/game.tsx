@@ -162,7 +162,7 @@ function HomeView({ user, snapshot, cards, onNavigate, onOpen }: { user: User; s
   return <>
     <section className="discovery-hero" aria-labelledby="discovery-title">
       <div className="hero-copy"><p className="eyebrow"><span className="live-dot" />ONE GUY. TOO MANY CARDS.</p>
-        <h1 id="discovery-title">신규는 한 명,<br /><span>짤은 {cards.length}종.</span></h1>
+        <h1 id="discovery-title">임신규<br /><span>카드 도감</span></h1>
         <p className="hero-description">사진첩에만 두기 아까운 표정들.<br />굳이 카드로 만들어봤습니다.</p>
         <div className="hero-actions"><motion.button className="btn btn-primary" onClick={() => onNavigate('pull')} whileTap={{ scale: 0.97 }}>{user && snapshot.freeAvailable ? '오늘의 무료 카드 열기' : '카드팩 열기'}<Icon name="arrow" /></motion.button><button className="text-button" onClick={() => onNavigate('collection')}>도감 둘러보기<Icon name="chevron" /></button></div>
         <p className="hero-note"><Icon name="sparkle" />매일 한 장 무료 · {cards.length}종의 임신규</p>
