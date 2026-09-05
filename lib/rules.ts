@@ -2,7 +2,7 @@ export type Rarity = 'N' | 'R' | 'SR' | 'SSR' | 'UR';
 
 export const RARITY_ORDER: Rarity[] = ['UR', 'SSR', 'SR', 'R', 'N'];
 
-const WEIGHTS: Array<[Rarity, number]> = [
+export const RARITY_WEIGHTS: Array<[Rarity, number]> = [
   ['N', 0.5],
   ['R', 0.27],
   ['SR', 0.14],
@@ -21,7 +21,7 @@ export function kstDate(date: Date): string {
 
 export function rollRarity(roll: number): Rarity {
   let total = 0;
-  for (const [rarity, weight] of WEIGHTS) {
+  for (const [rarity, weight] of RARITY_WEIGHTS) {
     total += weight;
     if (roll < total) return rarity;
   }

@@ -3,6 +3,7 @@ import { getDatabase } from '../db/index';
 import manifest from './data/cards.curated.json';
 import type { Card } from './cards';
 import { kstDate, rollRarity, type Rarity } from './rules';
+import { savePull } from './pull';
 
 export type { Card } from './cards';
 
@@ -82,59 +83,17 @@ export async function pullCards(userId: string, count: 1 | 5): Promise<{
 }> {
   const db = getDatabase();
   const now = new Date();
-  const today = kstDate(now);
-  const usedFreePull = count === 1 && await claimSinglePull(db, userId, today);
-  if (count === 5) await claimFivePulls(db, userId);
-
   const drawn = Array.from({ length: count }, () => pickCard(rollRarity(randomUnit())));
-  const pulledAt = now.toISOString();
-  const writes = drawn.flatMap((card) => [
-    db.prepare(`
-        INSERT INTO inventory (user_id, card_id, quantity, first_obtained_at)
-        VALUES (?, ?, 1, ?)
-        ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1
-        RETURNING quantity
-      `).bind(userId, card.id, pulledAt),
-    db.prepare(`
-        INSERT INTO pull_history (id, user_id, card_id, rarity, pulled_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).bind(crypto.randomUUID(), userId, card.id, card.rarity, pulledAt)
-  ]);
-  const writeResults = await db.batch(writes);
-
-  return {
-    results: drawn.map((card, index) => {
-      const quantity = Number((writeResults[index * 2]!.results[0] as { quantity: number }).quantity);
-      return { card, isNew: quantity === 1, quantity, usedFreePull };
-    }),
-    snapshot: await getSnapshot(userId, now)
-  };
-}
-
-async function claimSinglePull(db: D1Database, userId: string, today: string): Promise<boolean> {
-  const freeClaim = await db.prepare(`
-    UPDATE user_game_state SET last_free_pull_date = ?
-    WHERE user_id = ? AND (last_free_pull_date IS NULL OR last_free_pull_date != ?)
-  `).bind(today, userId, today).run();
-  if ((freeClaim.meta.changes ?? 0) > 0) return true;
-
-  const creditClaim = await db.prepare(`
-    UPDATE user_game_state SET pull_credits = pull_credits - 1
-    WHERE user_id = ? AND pull_credits > 0
-  `).bind(userId).run();
-  if ((creditClaim.meta.changes ?? 0) === 0) {
-    throw new GameError('no_credits', '오늘의 무료 뽑기를 이미 사용했고, 뽑기권이 부족합니다.');
-  }
-  return false;
-}
-
-async function claimFivePulls(db: D1Database, userId: string): Promise<void> {
-  const claim = await db.prepare(`
-    UPDATE user_game_state SET pull_credits = pull_credits - 5
-    WHERE user_id = ? AND pull_credits >= 5
-  `).bind(userId).run();
-  if ((claim.meta.changes ?? 0) === 0) {
-    throw new GameError('not_enough_credits', '5연속 뽑기에는 뽑기권 5개가 필요합니다.');
+  try {
+    const results = await savePull(db, userId, drawn, now);
+    return { results, snapshot: await getSnapshot(userId, now) };
+  } catch (error) {
+    if (error instanceof Error && /chk_user_game_state_credits/.test(error.message)) {
+      throw new GameError('not_enough_credits', count === 5
+        ? '5장 뽑기에는 뽑기권 5장이 필요해요.'
+        : '오늘의 무료 뽑기를 사용했고, 뽑기권이 부족해요.');
+    }
+    throw error;
   }
 }
 
