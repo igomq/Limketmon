@@ -5,8 +5,8 @@ import './globals.css';
 const origin = process.env.SITE_ORIGIN;
 
 export const metadata: Metadata = {
-  title: 'LIMKETMON — 평범한 순간, 범상치 않은 카드',
-  description: '세상에 하나뿐인 임신규 컬렉션. 매일 한 장 무료로 발견하고, 46개의 특별한 순간을 모아보세요.',
+  title: 'LIMKETMON — 신규는 한 명, 짤은 46종',
+  description: '사진첩에만 두기 아까운 임신규의 표정들. 매일 한 장 무료로 뽑고, 46종의 신규를 모아보세요.',
   openGraph: {
     title: 'LIMKETMON',
     description: '임신규 카드 도감',

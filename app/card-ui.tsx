@@ -69,7 +69,6 @@ export function CardArtwork({ card, quantity = 0, priority = false }: { card: Ca
       <div className="card-caption"><span>No. {String(card.version).padStart(3, '0')}</span><strong>{cardTitle(card)}</strong><small>{card.skillName}</small></div>
       {quantity > 1 && <span className="card-quantity">×{quantity}</span>}
       <motion.div className="card-foil" style={{ opacity: light, backgroundPosition: position }} />
-      <motion.div className="card-glitter" style={{ opacity: light, backgroundPosition: position }} />
       <motion.div className="card-glare" style={{ opacity: light, backgroundImage: glare }} />
       <span className="card-frame" />
     </motion.div>
@@ -82,7 +81,7 @@ export function CardButton({ card, quantity = 0, onClick, priority = false }: { 
 }
 
 export function CardBack({ count = 1 }: { count?: number }) {
-  return <div className="card-back"><div className="back-top"><span>THE ORIGINAL COLLECTION</span><span>VOL. 01</span></div><div className="back-center"><Brand /><span>매일, 새로운 발견.</span></div><div className="back-bottom"><span>{count === 5 ? 'FIVE CARDS' : 'ONE CARD'}<br />무엇이든 될 수 있는 한 장.</span><Icon name="sparkle" /></div></div>;
+  return <div className="card-back"><div className="back-top"><span>100% LIM SINGYU</span><span>VOL. 01</span></div><div className="back-center"><Brand /><span>또 너냐, 임신규.</span></div><div className="back-bottom"><span>{count === 5 ? 'FIVE CARDS' : 'ONE CARD'}<br />열어도 임신규. 또 열어도 임신규.</span><Icon name="sparkle" /></div></div>;
 }
 
 export function CardDetail({ card, quantity, obtainedAt, onClose }: { card: Card; quantity: number; obtainedAt?: string; onClose: () => void }) {
