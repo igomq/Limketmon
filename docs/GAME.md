@@ -1,0 +1,157 @@
+# LIMKETMON 게임 시스템
+
+이 문서는 카드 도감과 배틀을 잇는 수치와 규칙의 근거를 정리합니다. 모든 값은 `lib/` 소스에서만
+유도되고, 화면은 규칙을 다시 계산하지 않습니다. 카드를 추가하는 일반 절차는 [README](../README.md)의
+"카드 추가" 절차를 따릅니다.
+
+## 카드에서 스탯 유도
+
+`lib/battle/stats.ts`(`STAT_RULESET` 1)가 큐레이션 카드 하나를 전투 스탯으로 바꿉니다. 같은 카드는
+언제나 같은 스탯을 냅니다.
+
+| 스탯 | 식 | 현재 매니페스트 범위 |
+| --- | --- | --- |
+| `atk` | `card.attack` | 그대로 |
+| `def` | `card.defense` | 그대로 |
+| `maxHp` | `58 + round(defense × 0.85) + 등급 보너스` | 97~165 |
+| `spd` | `10 + floor(luck ÷ 4)` | 20~35 |
+| `crit` | `5 + floor(luck ÷ 10)` (퍼센트) | 9~15 |
+| `cost` | 등급별 코스트 표 | 2~6 |
+
+등급 보너스(체력만 올리고 효율은 올리지 않음):
+
+| 등급 | 체력 보너스 | 스킬 코스트 |
+| --- | --- | --- |
+| N | 0 | 2 |
+| R | 8 | 3 |
+| SR | 16 | 4 |
+| SSR | 26 | 5 |
+| UR | 34 | 6 |
+
+속성은 `visualTags`를 아래 표 순서(light → shadow → iron → nature → spark)로 훑어 처음 맞는
+키워드로 정하고, 아무것도 맞지 않으면 `ELEMENTS[version % 5]`로 떨어집니다.
+
+| 속성 | 키워드 |
+| --- | --- |
+| light | snow, glare, christmas-tree, thumb-up, peace-sign, bouquet, formalwear |
+| shadow | dark-background, eyes-closed, back-view, side-profile, low-quality, low-resolution, mask, negative-space, motion-blur, soft-focus |
+| iron | glasses, goggles, helmet, winter-gear, winter-jacket, uniform, striped-suit, vehicle, subway, transit, sign, billboard, backpack, papers |
+| nature | waterpark, wet-hair, waterline, food, spoon, chopsticks, restaurant, crowd, street, rain-overlay |
+| spark | distorted-filter, screenshot, screenshot-overlay, animated, gif, mirror-selfie, phone, phone-foreground, cat-filter, filter, recursive-face, circular-crop, collage, layered-composition, countdown-overlay, chat-overlay, low-angle |
+
+## 능력 DSL
+
+`lib/battle/abilities.ts`(`ABILITY_RULESET` 1)가 카드에서 서명 스킬 하나를 만듭니다. 능력은
+JavaScript 콜백이 아니라 데이터입니다: `{ id, name, description, cost, cooldown, ops }`.
+
+- `id`는 `ability:<cardId>@<ABILITY_RULESET>`이고 `name`·`description`은 카드의 `skillName`·`skillDescription`을 그대로 씁니다.
+- `cost`는 등급별 코스트 표가 항상 우선입니다.
+- `cooldown`은 아래 등급 기본값을 쓰되 `CURATED_ABILITIES`가 있으면 그 값이 이깁니다(N 0 / R 1 / SR 2 / SSR 2 / UR 3).
+
+op 종류:
+
+| op | 필드 | 의미 |
+| --- | --- | --- |
+| `damage` | `power`, `hits?`, `target?` | `power`만큼 때립니다. `hits`는 1~8 허용, 실행 시 최대 4. |
+| `heal` | `amount`, `target?` | 최대 HP까지 회복합니다. |
+| `shield` | `amount`, `target?` | `amount`만큼 흡수 풀을 겁니다(지속 2). |
+| `apply_status` | `status`, `turns`, `value?`, `chance?`, `target?` | 상태이상을 겁니다. `chance`가 있을 때만 난수를 씁니다. |
+| `modify_stat` | `status`, `turns`, `value`, `target?` | `atk_up`·`atk_down`·`def_up`·`def_down`만 허용합니다. |
+| `conditional` | `when`, `then` | 조건이 맞으면 `then`을 실행합니다. |
+
+target 종류: `enemy_active`, `enemy_lowest_hp`, `enemy_all`, `self`, `ally_lowest_hp`, `ally_all`.
+조건(`when`) 키: `selfHpBelow`, `targetHpBelow`, `turnAtLeast`, `targetHasStatus`. HP 임계값은 최대 HP
+대비 퍼센트이고, 모든 절이 참일 때만 `then`이 실행됩니다.
+
+검증 한계(`validateAbility`): `cost` 0~10, `cooldown` 0~5, `ops` 1~8개, `conditional` 중첩 1단계,
+`apply_status.turns` 0~10, `chance` 0~100, `damage.hits` 정수 1~8. 엔진은 못 믿는 입력을 만나면
+경고를 남기고 기본 공격으로 떨어집니다.
+
+등급별 기본 템플릿(속성 rider가 붙습니다 — light는 아군 공격 강화, shadow는 공격 약화, iron은 방어
+약화, nature는 중독, spark는 35% 기절):
+
+| 등급 | 기본 구성 |
+| --- | --- |
+| N | 1.0배 단타, 방어가 공격보다 높고 HP가 40% 미만이면 자기 회복(4 + round(방어 / 20)) 추가 |
+| R | 0.8배 단타 + 속성 rider |
+| SR | `luck ≥ 85`면 자기 공격 강화(20%, 3턴) + 0.6배 단타, 아니면 0.5배 3연타 |
+| SSR | 방어가 80 이상이면 아군 전체 보호막 + 0.5배 단타, 아니면 0.7배 전체 공격 + 속성 rider |
+| UR | HP 60% 미만이면 1.2배 단타 + 자기 회복 20, 이어서 0.6배 전체 공격 + 속성 rider |
+
+`CURATED_ABILITIES`는 소수 카드의 `ops`와 `cooldown`만 덮어씁니다. 이름·설명·코스트는 카드와 등급
+표가 계속 우선이라 한국어 카피가 흔들리지 않습니다.
+
+## 상태이상
+
+상태이상은 `{ id, turns, value }`로 다룹니다. 의미는 id마다 다릅니다.
+
+| id | 라벨 | value 의미 | 처리 |
+| --- | --- | --- | --- |
+| `poison` | 중독 | 턴당 피해 | 보유자 턴 시작 시 `value`만큼 피해. 보호막을 무시합니다. |
+| `regen` | 회복 | 턴당 회복 | 보유자 턴 시작 시 `value`만큼 회복(최대 HP까지). |
+| `shield` | 보호막 | 남은 흡수량 | 피해를 가장 먼저 흡수합니다. 0이 되면 사라지고, 부여 시 지속은 2입니다. |
+| `stun` | 기절 | — | 보유자의 다음 턴을 건너뜁니다. |
+| `atk_up` | 공격 강화 | 공격 증가 퍼센트 | 유효 공격력에 `+value%`. |
+| `atk_down` | 공격 약화 | 공격 감소 퍼센트 | 유효 공격력에 `−value%`. |
+| `def_up` | 방어 강화 | 방어 증가 퍼센트 | 유효 방어력에 `+value%`. |
+| `def_down` | 방어 약화 | 방어 감소 퍼센트 | 유효 방어력에 `−value%`. |
+
+지속 턴은 보유자 자신의 턴이 끝날 때 1씩 줄고, 0이 되면 제거됩니다. 중독과 회복은 턴 시작에
+처리되고, 기절은 행동 직전에 확인합니다.
+
+## 데미지 계산
+
+피해 한 방은 `lib/battle/engine.ts`에서 아래 순서로 계산합니다.
+
+```text
+attackValue = 기본 공격이면 effectiveStat(attacker, 'atk'), 스킬이면 op.power
+boost       = element_boost 규칙이 공격자 속성과 맞으면 1 + bonus, 아니면 1
+base        = max(1, attackValue × boost − effectiveStat(defender, 'def') × 0.45)
+variance    = 0.9 + draw1 × 0.2          (첫 번째 난수)
+element     = 링 상대가 다음 속성이면 1.25, 이전 속성이면 0.8, 그 외 1.0
+crit        = draw2 × 100 < attacker.crit ? 1.6 : 1.0   (두 번째 난수)
+final       = max(1, round(base × variance × element × crit))
+```
+
+난수는 피해 한 방마다 "분산 → 치명타" 순서로만 뽑고, `apply_status`는 `chance`가 있을 때만 뽑습니다.
+난수는 모두 `state.rng`(mulberry32)에서 나오므로 같은 시드·같은 결정이면 순서가 어긋나지 않습니다.
+보호막이 있으면 먼저 흡수하고, 중독·회복은 방어·보호막과 무관한 고정값입니다.
+
+## AI 휴리스틱 우선순위
+
+상대는 순수 함수 `aiDecision(state, profile)`로만 결정합니다(자체 난수 없음). 그래서 클라이언트
+미리보기와 서버 재시뮬레이션이 같은 수를 냅니다. 우선순위는 다음과 같습니다.
+
+1. 결정타 — `lethalFirst`이고 기본 공격 추정 피해가 가장 약한 적의 남은 HP 이상이면 기본 공격.
+2. 구출 — 스킬에 `heal`이나 `shield`가 있고 아군 중 `healBelow` 비율 이하로 떨어진 유닛이 있으면 스킬.
+3. 광역 절제 — 스킬이 `enemy_all`을 노리는데 살아 있는 적 비율이 `skillMinTargets`보다 낮으면 기본 공격.
+4. 절제 — 남은 스킬은 `skillAppetite`로 문턱을 정합니다. 에너지가 `cost + round((1 − skillAppetite) × 4)` 이상일 때만 스킬.
+
+상대별 프로필 값(`healBelow`, `lethalFirst`, `skillMinTargets`, `skillAppetite`)은
+`lib/battle/opponents.ts`에 있고, 같은 id의 전투를 다시 돌릴 때 그대로 조회됩니다.
+
+## 서버 재시뮬레이션과 replay 재현 절차
+
+전투는 서버가 시드·상대·규칙·덱 스냅샷을 정해 `battles` 행에 남기고, 클라이언트는 덱 id와 행동
+로그만 보냅니다. 같은 전투를 재현하는 절차는 다음과 같습니다.
+
+1. `battles` 행에서 `kind`, `opponent_id`, `ruleset_version`, `seed`, `deck_cards`, `modifier`, `decisions`를 읽습니다.
+2. `deck_cards` 슬롯 순서와 `opponent_id`로 `buildSetup(...)`을 만들어 `BattleSetup`을 복원합니다(상대 팀은 `opponents.ts` 정의에서 나옵니다).
+3. 저장된 `decisions`를 순서대로 대고, 상대 턴은 `aiDecision(state, opponent.profile)`로 결정해 `runBattle(setup, decisions, decide)`을 돌립니다.
+4. 나온 `state.status`를 저장된 `result`와 비교합니다. `replay`는 이 일치 여부를 `verified`로 돌려줍니다.
+5. 저장된 `ruleset_version`이 현재 `BATTLE_RULESET_VERSION`과 다르면 재판정하지 않고 `invalid`로 확정합니다.
+
+`Decision`은 `{ uid, action: 'attack' | 'skill' }`이고 `uid`는 `state.activeUid`와 같아야 합니다. 그래서
+재현에는 시드와 결정 목록만 있으면 충분합니다. 스탯·능력·엔진 규칙이 결과를 바꿀 수 있게 바뀌면
+`BATTLE_RULESET_VERSION`을 올리고, 이전 버전의 전투는 다시 심사하지 않습니다.
+
+## 새 카드 추가 시 자동 유도
+
+카드를 추가할 때 스탯표나 능력표를 손으로 만들지 않습니다.
+
+1. README의 카드 추가 절차대로 이미지와 `lib/data/cards.curated.json` metadata(`rarity`, `attack`, `defense`, `luck`, `visualTags`, `skillName`, `skillDescription`)를 채웁니다.
+2. `pnpm cards:sync`로 이미지와 manifest 정합성을 확인합니다.
+3. `node --import ./tests/helpers/register.mjs --test tests/battle-data.test.ts`로 스탯 밴드와 능력 DSL 유효성, 능력 id 중복 여부를 확인합니다. 능력은 등급 템플릿에서 자동 생성되므로 카드별 작업이 필요 없습니다.
+4. 특정 카드의 서명만 조정하고 싶으면 `CURATED_ABILITIES`에 `ops`/`cooldown`만 추가합니다. 이름·설명·코스트는 건드리지 않습니다.
+
+스탯과 능력을 계산하는 규칙 자체를 바꾸면 `STAT_RULESET` 또는 `ABILITY_RULESET`을 올립니다.

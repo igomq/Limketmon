@@ -9,5 +9,7 @@ node_modules
 /.svelte-kit
 /test-results
 /.wrangler
+# Local pnpm store shim used when the default store path is not writable.
+/.storelink
 /package
 vite.config.ts.timestamp-*

@@ -3,19 +3,29 @@
 import { AnimatePresence, MotionConfig, motion, useMotionValue, useReducedMotion, useTransform, animate } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { Card, PullResult, Snapshot } from '../lib/game';
+import type { BattleSummaryRow, DeckSummary } from '../lib/battle/api';
 import { RARITY_ORDER, RARITY_WEIGHTS } from '../lib/rules';
+import { STATUS_LABEL, type BattleEvent } from '../lib/battle/types';
 import { cardTitle, projectedPosition, selectCards, type CollectionFilter } from '../lib/collection';
 import { Brand, CardArtwork, CardBack, CardButton, CardDetail, Icon, gentleSpring, spring } from './card-ui';
+import { BattleView } from './battle-ui';
+import { DeckView } from './deck-ui';
+import './battle.css';
 
-type Tab = 'home' | 'pull' | 'collection' | 'coupon';
 type User = { email: string; displayName: string } | null;
 type Feedback = { text: string; error: boolean } | null;
-const tabs = [
+/** Every screen the app can show; a hash may point at any of them. */
+const TABS = ['home', 'pull', 'collection', 'deck', 'battle', 'stats', 'coupon'] as const;
+type Tab = (typeof TABS)[number];
+/** The mobile bar holds five; 덱 opens from 홈/대련 and 쿠폰 from the 계정 영역 뽑기권 표시와 카드팩 화면. */
+const navItems = [
   { id: 'home', label: '발견', icon: 'home' },
   { id: 'pull', label: '카드팩', icon: 'pack' },
   { id: 'collection', label: '도감', icon: 'grid' },
-  { id: 'coupon', label: '쿠폰', icon: 'ticket' }
+  { id: 'battle', label: '대련', icon: 'hand' },
+  { id: 'stats', label: '기록', icon: 'clock' }
 ] as const;
+const isTab = (value: string): value is Tab => (TABS as readonly string[]).includes(value);
 const defaultFilter: CollectionFilter = { query: '', rarity: 'all', ownership: 'all', sort: 'rarity' };
 const signIn = (tab: Tab) => `/signin-with-chatgpt?return_to=${encodeURIComponent(`/#${tab}`)}`;
 const nextReset = () => Math.floor((Date.now() + 9 * 3600000) / 86400000) * 86400000 + 86400000 - 9 * 3600000;
@@ -39,6 +49,9 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
   const mutation = useRef(0);
   const content = useRef<HTMLElement>(null);
   const inventory = useMemo(() => new Map(snapshot.inventory.map((item) => [item.cardId, item])), [snapshot.inventory]);
+  const ownedCardIds = useMemo(() => snapshot.inventory.map((item) => item.cardId), [snapshot.inventory]);
+  const handleDecks = useCallback((decks: DeckSummary[]) => setSnapshot((current) => ({ ...current, decks })), []);
+  const reportError = useCallback((message: string) => setFeedback({ text: message, error: true }), []);
 
   const refresh = useCallback(async () => {
     if (!user || inFlight.current) return;
@@ -54,7 +67,7 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
   useEffect(() => {
     const sync = () => {
       const hash = window.location.hash.slice(1);
-      setTab(tabs.some((item) => item.id === hash) ? hash as Tab : 'home');
+      setTab(isTab(hash) ? hash : 'home');
     };
     sync();
     window.addEventListener('popstate', sync);
@@ -129,12 +142,13 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
       <a className="skip-link" href="#content">본문으로 건너뛰기</a>
       <header className="topbar"><div className="topbar-inner">
         <button className="brand" onClick={() => navigate('home')} aria-label="LIMKETMON 발견 페이지"><Brand /></button>
-        <nav className="main-nav" aria-label="주요 메뉴">{tabs.map((item) => <motion.button key={item.id} onClick={() => navigate(item.id)} className={tab === item.id ? 'active' : ''} aria-current={tab === item.id ? 'page' : undefined} whileTap={{ scale: 0.95 }}>
+        <nav className="main-nav" aria-label="주요 메뉴" style={{ gridTemplateColumns: `repeat(${navItems.length}, minmax(0, 1fr))` }}>{navItems.map((item) => <motion.button key={item.id} onClick={() => navigate(item.id)} className={tab === item.id ? 'active' : ''} aria-current={tab === item.id ? 'page' : undefined} whileTap={{ scale: 0.95 }}>
           {tab === item.id && <motion.span className="nav-indicator" layoutId="navigation" transition={spring} />}
           <span className="nav-label"><Icon name={item.icon} />{item.label}</span>
           {item.id === 'pull' && user && snapshot.freeAvailable && <i className="nav-dot" aria-label="무료 뽑기 가능" />}
+          {item.id === 'battle' && user && !snapshot.daily.cleared && <i className="nav-dot" aria-label="오늘의 도전 남음" />}
         </motion.button>)}</nav>
-        <div className="account-area">{user ? <><span className="credit-pill"><Icon name="ticket" /><strong>{snapshot.credits.toLocaleString('ko-KR')}</strong><span className="sr-only">뽑기권</span></span><a className="icon-button" href="/signout-with-chatgpt?return_to=%2F" aria-label="로그아웃" title="로그아웃"><Icon name="logout" /></a></> : <a className="sign-in-link" href={signIn(tab)}>로그인<Icon name="arrow" /></a>}</div>
+        <div className="account-area">{user ? <><button type="button" className="text-button credit-pill" onClick={() => navigate('coupon')} title="쿠폰으로 뽑기권 받기"><Icon name="ticket" /><strong>{snapshot.credits.toLocaleString('ko-KR')}</strong><span className="sr-only">뽑기권, 쿠폰 입력으로 받기</span></button><a className="icon-button" href="/signout-with-chatgpt?return_to=%2F" aria-label="로그아웃" title="로그아웃"><Icon name="logout" /></a></> : <a className="sign-in-link" href={signIn(tab)}>로그인<Icon name="arrow" /></a>}</div>
       </div></header>
       <main id="content" ref={content} tabIndex={-1} className="page">
         <AnimatePresence mode="popLayout" initial={false}>
@@ -142,6 +156,9 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
             {tab === 'home' && <HomeView user={user} snapshot={snapshot} cards={cards} onNavigate={navigate} onOpen={setSelected} />}
             {tab === 'pull' && <PullView user={user} snapshot={snapshot} count={count} onCount={setCount} busy={busy} results={results} pullId={pullId} onPull={pull} onOpen={setSelected} onNavigate={navigate} />}
             {tab === 'collection' && <CollectionView user={user} snapshot={snapshot} cards={cards} filter={filter} onFilter={setFilter} onOpen={setSelected} onNavigate={navigate} />}
+            {tab === 'deck' && <DeckView user={user} decks={snapshot.decks} ownedCardIds={ownedCardIds} cards={cards} busy={busy} onDecksChange={handleDecks} onOpenCard={setSelected} onError={reportError} />}
+            {tab === 'battle' && <BattleView user={user} decks={snapshot.decks} cards={cards} daily={snapshot.daily} onStateChange={refresh} onNavigate={(next) => { if (isTab(next)) navigate(next); }} onOpenCard={setSelected} onError={reportError} />}
+            {tab === 'stats' && <StatsView user={user} snapshot={snapshot} cards={cards} onOpenCard={setSelected} />}
             {tab === 'coupon' && <CouponView user={user} busy={busy} feedback={feedback} onSubmit={redeem} onNavigate={navigate} />}
           </motion.div>
         </AnimatePresence>
@@ -172,6 +189,11 @@ function HomeView({ user, snapshot, cards, onNavigate, onOpen }: { user: User; s
       </div>
     </section>
     {user ? <section className="collector-strip" aria-label="나의 수집 현황"><div className="collector-identity"><span className="avatar">{Array.from(user.displayName)[0]}</span><div><span className="meta-label">MY COLLECTION</span><strong>{user.displayName}</strong></div></div><div><span className="meta-label">발견한 카드</span><strong>{snapshot.inventory.length}<small> / {cards.length}</small></strong></div><div><span className="meta-label">모은 카드</span><strong>{totalOwned}<small> 장</small></strong></div><button className="daily-status" onClick={() => onNavigate('pull')}><span className="status-dot" data-ready={snapshot.freeAvailable} />{snapshot.freeAvailable ? '무료 팩이 기다리고 있어요' : '오늘의 무료 팩 개봉 완료'}<Icon name="arrow" /></button></section> : <section className="welcome-strip"><span><Icon name="sparkle" /><strong>신규 수집에 동참하시겠어요?</strong><span>로그인하면 카드가 내 도감에 차곡차곡.</span></span><a href={signIn('pull')}>ChatGPT로 시작하기<Icon name="arrow" /></a></section>}
+    <section className="battle-deck" aria-labelledby="home-battle-title">
+      <div className="battle-deck-head"><h2 id="home-battle-title">카드 3장으로 대련.</h2><p className="deck-hint"><Icon name={snapshot.daily.cleared ? 'check' : 'sparkle'} />{snapshot.daily.cleared ? '오늘의 도전 완료' : '오늘의 도전 열림'}</p></div>
+      <p className="deck-note">오늘의 도전 · {snapshot.daily.title} · {snapshot.daily.ruleLabel} · 이기면 뽑기권 {snapshot.daily.rewardCredits}장</p>
+      <div className="hero-actions"><motion.button className="btn btn-primary" onClick={() => onNavigate('battle')} whileTap={{ scale: 0.97 }}>{snapshot.daily.cleared ? '대련 계속하기' : '오늘의 도전 하러 가기'}<Icon name="arrow" /></motion.button><button className="text-button" onClick={() => onNavigate('deck')}>전투 덱 편집<Icon name="chevron" /></button></div>
+    </section>
     <section className="home-collection" aria-labelledby="home-collection-title"><div className="section-head"><div><p className="eyebrow">{recent.length ? 'RECENTLY COLLECTED' : 'CAUGHT ON CAMERA'}</p><h2 id="home-collection-title">{recent.length ? '방금 잡은 신규들' : '이런 신규는 어때요?'}</h2></div><button className="text-button" onClick={() => onNavigate('collection')}>전체 도감<Icon name="arrow" /></button></div>
       <div className="featured-grid">{featured.map((card) => <div className="gallery-item" key={card.id}><CardButton card={card} quantity={snapshot.inventory.find((item) => item.cardId === card.id)?.quantity} onClick={() => onOpen(card)} /><div className="gallery-item-caption"><span>{cardTitle(card)}</span><span className={`rarity-text rarity-${card.rarity}`}>{card.rarity}</span></div></div>)}</div>
     </section>
@@ -213,7 +235,7 @@ function PullView({ user, snapshot, count, onCount, busy, results, pullId, onPul
       {user ? <motion.button className="btn btn-primary open-pack-button" disabled={busy || !canPull} onClick={onPull} whileTap={{ scale: 0.98 }}>{busy ? '카드 확인 중…' : results.length ? `새 팩 열기 · ${cost}` : `팩 열기 · ${cost}`}<Icon name="arrow" /></motion.button> : <a className="btn btn-primary open-pack-button" href={signIn('pull')}>로그인하고 무료로 열기<Icon name="arrow" /></a>}
       {user && !canPull && !busy && <p className="insufficient">뽑기권이 부족해요. <button onClick={() => onNavigate('coupon')}>쿠폰 입력하기<Icon name="arrow" /></button></p>}
       <div className="pack-balance"><span>내 뽑기권 <strong>{user ? `${snapshot.credits}장` : '로그인 후 확인'}</strong></span><span><Icon name="clock" /><ResetClock /></span></div>
-      <details className="odds"><summary>카드 등장 확률<span>확인하기 +</span></summary><div>{RARITY_ORDER.map((rarity) => <div key={rarity}><span className={`rarity-text rarity-${rarity}`}>{rarity}</span><strong>{Math.round(RARITY_WEIGHTS.find(([r]) => r === rarity)![1] * 100)}%</strong></div>)}</div><p>모든 뽑기는 독립적으로 진행됩니다. 5장 뽑기에는 무료 횟수가 사용되지 않습니다.</p></details>
+      <details className="odds"><summary>카드 등장 확률<span>확인하기 +</span></summary><div>{RARITY_ORDER.map((rarity) => <div key={rarity}><span className={`rarity-text rarity-${rarity}`}>{rarity}</span><strong>{Math.round(RARITY_WEIGHTS.find(([r]) => r === rarity)![1] * 100)}%</strong></div>)}</div><p>천장까지 {snapshot.pityRemaining}회</p><p>모든 뽑기는 독립적으로 진행됩니다. 5장 뽑기에는 무료 횟수가 사용되지 않습니다.</p></details>
     </aside></div>
     {!!results.length && <div className="result-actions"><p><Icon name="check" />모든 카드는 이미 도감에 안전하게 저장됐어요.</p><button className="text-button" onClick={() => onNavigate('collection')}>도감에서 보기<Icon name="arrow" /></button></div>}
   </section>;
@@ -284,4 +306,206 @@ function CollectionView({ user, snapshot, cards, filter, onFilter, onOpen, onNav
 
 function CouponView({ user, busy, feedback, onSubmit, onNavigate }: { user: User; busy: boolean; feedback: Feedback; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onNavigate: (tab: Tab) => void }) {
   return <section className="coupon-view" aria-labelledby="coupon-title"><div className="section-head"><div><p className="eyebrow">MORE PULLS. SAME GUY.</p><h1 id="coupon-title">뽑을 핑계, 여기 있습니다.</h1><p>뽑기권이 없어서 못 놀리는 일은 없도록.</p></div></div><div className="coupon-layout"><div className="welcome-ticket"><span className="eyebrow">WELCOME TO THE SINGYU CLUB</span><div className="ticket-value">100<span>장의<br />신규 소환권</span></div><p>처음 오셨으니 100장 드립니다.</p><div className="ticket-code"><span>WELCOME CODE</span><strong>LIMKETMON</strong><Icon name="ticket" /></div><span className="ticket-footnote">계정당 1회 · 뽑기권 100장</span></div><div className="coupon-form-panel"><Icon name="ticket" /><h2>신규 소환권 충전소.</h2><p>가지고 있는 쿠폰 코드를 입력해주세요.</p>{user ? <form onSubmit={onSubmit}><label htmlFor="coupon-code">쿠폰 코드</label><input id="coupon-code" name="code" placeholder="LIMKETMON" maxLength={64} required autoComplete="off" autoCapitalize="characters" spellCheck={false} /><button className="btn btn-primary" disabled={busy}>{busy ? '쿠폰 확인 중…' : '뽑기권 받기'}<Icon name="arrow" /></button></form> : <a className="btn btn-primary" href={signIn('coupon')}>로그인하고 선물 받기<Icon name="arrow" /></a>}{feedback && <div className={`feedback ${feedback.error ? 'error' : 'success'}`} role={feedback.error ? 'alert' : 'status'}><Icon name={feedback.error ? 'clock' : 'check'} /><span>{feedback.text}{!feedback.error && <button className="text-button" onClick={() => onNavigate('pull')}>카드팩 열러 가기<Icon name="arrow" /></button>}</span></div>}<p className="coupon-note">받은 뽑기권은 내 계정에 저장됩니다.<br />이미 사용한 쿠폰은 다시 사용할 수 없어요.</p></div></div></section>;
+}
+
+/** Opens once, plays the stored event log back, and closes with the sheet. */
+function ReplaySheet({ row, onClose }: { row: BattleSummaryRow; onClose: () => void }) {
+  const reduced = useReducedMotion();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [replay, setReplay] = useState<ReplayPayload | null>(null);
+  const [shown, setShown] = useState(0);
+
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
+    dialog.current?.showModal();
+    document.body.style.overflow = 'hidden';
+    let live = true;
+    (async () => {
+      try {
+        const response = await fetch('/api/battle', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'replay', battleId: row.id })
+        });
+        const payload = (await response.json()) as { replay?: ReplayPayload; error?: string };
+        if (!live) return;
+        if (!response.ok || !payload.replay) throw new Error(payload.error || '다시보기를 불러오지 못했어요.');
+        setReplay(payload.replay);
+        setState('ready');
+      } catch {
+        if (live) setState('error');
+      }
+    })();
+    return () => {
+      live = false;
+      dialog.current?.close();
+      document.body.style.overflow = overflow;
+      previous?.focus({ preventScroll: true });
+    };
+  }, [row.id]);
+
+  const events = replay?.events ?? [];
+  // Reveal the log over time so it reads as a battle rather than a wall of text.
+  useEffect(() => {
+    if (state !== 'ready') return;
+    if (shown >= events.length) return;
+    const timer = setTimeout(() => setShown((value) => Math.min(events.length, value + (reduced ? 4 : 1))), reduced ? 60 : 240);
+    return () => clearTimeout(timer);
+  }, [state, shown, events.length, reduced]);
+
+  const visible = events.slice(0, shown);
+  return (
+    <motion.dialog ref={dialog} className="detail-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+      <motion.section className="detail-sheet replay-sheet" initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={spring}>
+        <button className="icon-button detail-close" autoFocus onClick={onClose} aria-label="다시보기 닫기"><Icon name="close" /></button>
+        <header className="replay-head">
+          <p className="eyebrow">BATTLE REPLAY</p>
+          <h2>{row.opponentName} · {row.result === 'won' ? '승리' : row.result === 'lost' ? '패배' : row.result === 'draw' ? '무승부' : '기록 없음'}</h2>
+          <p className="replay-meta">{row.kstDate} · {row.rounds}라운드 · {row.damageDealt} 피해</p>
+        </header>
+        {state === 'loading' && <p className="replay-status" role="status"><span className="loading-dot" />기록을 재생하고 있어요.</p>}
+        {state === 'error' && <p className="replay-status" role="alert">다시보기를 불러오지 못했어요.</p>}
+        {state === 'ready' && (
+          <>
+            <div className="replay-stage">
+              {replay && replay.verified && <span className="replay-verified"><Icon name="check" />서버 검증 일치</span>}
+              <progress className="replay-progress" value={shown} max={events.length} aria-label="재생 진행" />
+            </div>
+            <ol className="replay-log" aria-live="polite">
+              {visible.map((event, index) => (
+                <li key={index} className={`replay-line replay-${event.t}`}>
+                  <span className="replay-verb">{replayVerb(event)}</span>
+                  <span className="replay-text">{replayText(event)}</span>
+                </li>
+              ))}
+            </ol>
+            {shown < events.length && <button className="text-button" onClick={() => setShown(events.length)}>끝까지 보기<Icon name="arrow" /></button>}
+          </>
+        )}
+      </motion.section>
+    </motion.dialog>
+  );
+}
+
+/** The minimal shape of GET/POST /api/battle {action:'replay'}. */
+type ReplayPayload = {
+  result: string;
+  verified: boolean;
+  rulesetVersion: number;
+  events: BattleEvent[];
+};
+
+function replayVerb(event: BattleEvent): string {
+  switch (event.t) {
+    case 'start':
+      return event.round + 'R';
+    case 'turn':
+      return '턴';
+    case 'action':
+      return '행동';
+    case 'damage':
+      return '피해';
+    case 'heal':
+      return '회복';
+    case 'shield':
+      return '보호';
+    case 'status':
+      return '상태';
+    case 'skip':
+      return '대기';
+    case 'down':
+      return '전투불능';
+    case 'warn':
+      return '주의';
+    default:
+      return '종료';
+  }
+}
+
+/** Plain Korean for one stored event. The replay never re-derives rules, it only reports them. */
+function replayText(event: BattleEvent): string {
+  switch (event.t) {
+    case 'start':
+      return `${event.round}라운드 시작`;
+    case 'turn':
+      return `${event.uid} 차례`;
+    case 'action':
+      return event.abilityName ? `${event.uid} · ${event.abilityName}` : `${event.uid} · 일반 공격`;
+    case 'damage':
+      return `${event.uid} → ${event.target} ${event.amount}${event.crit ? ' (치명타)' : ''}${event.absorbed ? ` (보호막 ${event.absorbed})` : ''}`;
+    case 'heal':
+      return `${event.target} ${event.amount} 회복`;
+    case 'shield':
+      return `${event.target} 보호막 ${event.amount}`;
+    case 'status':
+      return `${event.target} ${STATUS_LABEL[event.status]}${event.applied ? '' : ' 저항'}`;
+    case 'skip':
+      return event.reason === 'stun' ? `${event.uid} 기절` : `${event.uid} 행동 불가`;
+    case 'down':
+      return `${event.uid} 쓰러짐`;
+    case 'warn':
+      return event.message;
+    default:
+      return `${event.status === 'won' ? '승리' : event.status === 'lost' ? '패배' : '무승부'} · ${event.round}라운드`;
+  }
+}
+
+function StatsView({ user, snapshot, cards, onOpenCard }: { user: User; snapshot: Snapshot; cards: Card[]; onOpenCard: (card: Card) => void }) {
+  const [replayRow, setReplayRow] = useState<BattleSummaryRow | null>(null);
+  const stats = snapshot.stats;
+  const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
+  const metrics: Array<[string, string | number, string?]> = [
+    ['전투', stats.battles, '회'],
+    ['승리', stats.wins, '회'],
+    ['패배', stats.losses, '회'],
+    ['승률', stats.winRate, '%'],
+    ['현재 연승', stats.streak],
+    ['최대 연승', stats.bestStreak],
+    ['보스 격파', stats.bossClears, '회'],
+    ['데일리 클리어', stats.dailyClears, '회'],
+    ['총 뽑기', stats.totalPulls, '회']
+  ];
+  const slots = RARITY_ORDER.reduce((sum, rarity) => sum + (stats.rarityUsage[rarity] ?? 0), 0);
+  const unlockedCount = stats.achievements.filter((achievement) => achievement.unlockedAt !== null).length;
+
+  return <section aria-labelledby="stats-title">
+    <header className="section-head"><div><p className="eyebrow">BATTLE RECORD</p><h1 id="stats-title">전투 기록.</h1><p>대련과 뽑기 기록, 그리고 업적을 모아봤습니다.</p></div></header>
+    {!user ? <section className="welcome-strip"><span><Icon name="sparkle" /><strong>로그인하면 기록이 쌓입니다.</strong><span>대련 승패와 업적이 이 화면에 남아요.</span></span><a href={signIn('stats')}>ChatGPT로 시작하기<Icon name="arrow" /></a></section> : <>
+      <dl className="card-stats">{metrics.map(([label, value, unit]) => <div key={label}><dt>{label}</dt><dd>{value}{unit && <span>{unit}</span>}</dd></div>)}</dl>
+      <details className="odds"><summary>등급별 뽑기<span>확인하기 +</span></summary><div>{RARITY_ORDER.map((rarity) => <div key={rarity}><span className={`rarity-text rarity-${rarity}`}>{rarity}</span><strong>{stats.pullsByRarity[rarity] ?? 0}회</strong></div>)}</div></details>
+      <details className="odds"><summary>등급별 사용률<span>확인하기 +</span></summary><div>{RARITY_ORDER.map((rarity) => <div key={rarity}><span className={`rarity-text rarity-${rarity}`}>{rarity}</span><strong>{slots ? Math.round(((stats.rarityUsage[rarity] ?? 0) / slots) * 100) : 0}%</strong></div>)}</div><p>대련에 낸 덱 슬롯을 기준으로 셉니다.</p></details>
+      <section className="opponent-section" aria-labelledby="stats-top-cards"><div className="opponent-heading"><h2 id="stats-top-cards">많이 쓴 카드</h2></div>{stats.topCards.length ? <ul className="deck-list" aria-label="가장 많이 쓴 카드">{stats.topCards.map((entry) => { const card = byId.get(entry.cardId); return card ? <li key={entry.cardId} className="deck-row"><span className="deck-pick"><strong className="deck-name">{cardTitle(card)}</strong><span className="deck-meta"><span className={`rarity-text rarity-${card.rarity}`}>{card.rarity}</span><span>{entry.uses}회 출전</span><span>승리 {entry.wins}회</span></span></span><button className="text-button" onClick={() => onOpenCard(card)}>정보<Icon name="arrow" /></button></li> : null; })}</ul> : <p className="deck-note">아직 전투 기록이 없어요. 대련을 시작하면 여기에 쌓입니다.</p>}</section>
+      <section className="opponent-section" aria-labelledby="stats-replays">
+        <div className="opponent-heading"><h2 id="stats-replays">전투 다시보기</h2><p className="deck-hint">최근 20회</p></div>
+        {snapshot.recentBattles.length ? (
+          <ul className="deck-list" aria-label="최근 전투">
+            {snapshot.recentBattles.map((row) => (
+              <li key={row.id} className="deck-row">
+                <span className="deck-pick">
+                  <strong className="deck-name">{row.opponentName}</strong>
+                  <span className="deck-meta">
+                    <span className={row.result === 'won' ? 'replay-win' : row.result === 'lost' ? 'replay-loss' : 'replay-draw'}>
+                      {row.result === 'won' ? '승리' : row.result === 'lost' ? '패배' : row.result === 'draw' ? '무승부' : '미정'}
+                    </span>
+                    <span>{row.kind === 'daily' ? '데일리' : 'PvE'}</span>
+                    <span>{row.rounds}라운드</span>
+                    <span>{row.kstDate}</span>
+                  </span>
+                </span>
+                <button className="text-button" onClick={() => setReplayRow(row)}>다시보기<Icon name="arrow" /></button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="deck-note">아직 전투 기록이 없어요. 대련을 시작하면 여기에서 다시 볼 수 있어요.</p>
+        )}
+      </section>
+      <section className="opponent-section" aria-labelledby="stats-achievements"><div className="opponent-heading"><h2 id="stats-achievements">업적</h2><p className="deck-hint"><Icon name="check" />{unlockedCount} / {stats.achievements.length} 해제</p></div>
+        <ul className="opponent-grid">{stats.achievements.map((achievement) => { const unlocked = achievement.unlockedAt !== null; const reached = stats.satisfied.includes(achievement.id); return <li key={achievement.id}><article className="opponent-card"><header><div><h3>{achievement.name}</h3><p className="opponent-title">{achievement.description}</p></div><span className="difficulty">{unlocked ? '해제' : reached ? '달성' : '잠금'}</span></header><p className="opponent-reward"><Icon name="ticket" />보상 뽑기권 {achievement.reward}장{unlocked ? ' · 지급 완료' : reached ? ' · 전투를 마치면 지급' : ''}</p></article></li>; })}</ul>
+      </section>
+      <AnimatePresence>{replayRow && <ReplaySheet key={replayRow.id} row={replayRow} onClose={() => setReplayRow(null)} />}</AnimatePresence>
+    </>}
+  </section>;
 }

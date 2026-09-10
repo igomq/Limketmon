@@ -3,6 +3,8 @@
 import { motion, useDragControls, useMotionTemplate, useMotionValue, useReducedMotion, useSpring, animate } from 'motion/react';
 import { useEffect, useId, useRef, type PointerEvent, type ReactNode } from 'react';
 import type { Card } from '../lib/cards';
+import { battleStats } from '../lib/battle/stats';
+import { ELEMENT_LABEL, STATUS_LABEL, type AbilityOp } from '../lib/battle/types';
 import { cardTitle, projectedPosition } from '../lib/collection';
 
 export const spring = { type: 'spring' as const, stiffness: 360, damping: 34, mass: 0.9 };
@@ -84,6 +86,58 @@ export function CardBack({ count = 1 }: { count?: number }) {
   return <div className="card-back"><div className="back-top"><span>100% LIM SINGYU</span><span>VOL. 01</span></div><div className="back-center"><Brand /><span>또 너냐, 임신규.</span></div><div className="back-bottom"><span>{count === 5 ? 'FIVE CARDS' : 'ONE CARD'}<br />열어도 임신규. 또 열어도 임신규.</span><Icon name="sparkle" /></div></div>;
 }
 
+/** Battle numbers for the detail sheet. Derived from lib, so the sheet never re-implements rules. */
+function BattleCardPanel({ card }: { card: Card }) {
+  const stats = battleStats(card);
+  const rows: Array<[string, string]> = [
+    ['체력', String(stats.maxHp)],
+    ['공격', String(stats.atk)],
+    ['방어', String(stats.def)],
+    ['속도', String(stats.spd)],
+    ['치명타', stats.crit + '%'],
+    ['속성', ELEMENT_LABEL[stats.element]]
+  ];
+  return (
+    <div className="battle-card-panel">
+      <span className="eyebrow">BATTLE PROFILE</span>
+      <dl className="battle-card-stats">
+        {rows.map(([label, value]) => (
+          <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+        ))}
+      </dl>
+      <p className="battle-card-skill">
+        <Icon name="sparkle" />
+        <span>기운 <strong>{stats.cost}</strong> 소모{stats.ability.cooldown > 0 ? ` · 재사용 ${stats.ability.cooldown}턴` : ' · 쿨다운 없음'} · {describeOps(stats.ability.ops)}</span>
+      </p>
+    </div>
+  );
+}
+
+/** One plain-Korean line for what the skill does, taken straight from the ability data. */
+function describeOps(ops: readonly AbilityOp[]): string {
+  return ops
+    .map((op) => {
+      switch (op.op) {
+        case 'damage':
+          return op.hits && op.hits > 1 ? `피해 ${op.power}×${op.hits}회` : `피해 ${op.power}`;
+        case 'heal':
+          return `회복 ${op.amount}`;
+        case 'shield':
+          return `보호막 ${op.amount}`;
+        case 'apply_status':
+          return STATUS_LABEL[op.status] + (op.turns ? ` ${op.turns}턴` : '');
+        case 'modify_stat':
+          return `${STATUS_LABEL[op.status]} ${op.value}%`;
+        case 'conditional':
+          return `조건부(${describeOps(op.then)})`;
+        default:
+          return '';
+      }
+    })
+    .filter(Boolean)
+    .join(' · ');
+}
+
 export function CardDetail({ card, quantity, obtainedAt, onClose }: { card: Card; quantity: number; obtainedAt?: string; onClose: () => void }) {
   const reduced = useReducedMotion();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -116,6 +170,7 @@ export function CardDetail({ card, quantity, obtainedAt, onClose }: { card: Card
           <div className="skill-block"><span className="eyebrow">SPECIAL ABILITY</span><h3>{card.skillName}</h3><p>{card.skillDescription}</p></div>
           <blockquote>“{card.flavorText}”</blockquote>
           <dl className="card-stats">{[['공격', card.attack], ['방어', card.defense], ['행운', card.luck]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}<span>/ 100</span></dd><div className="stat-track" aria-hidden="true"><motion.i initial={{ scaleX: reduced ? Number(value) / 100 : 0 }} animate={{ scaleX: Number(value) / 100 }} transition={{ ...spring, delay: reduced ? 0 : 0.15 }} /></div></div>)}</dl>
+          <BattleCardPanel card={card} />
           <div className="detail-ownership"><span>{quantity ? <><Icon name="check" />내 컬렉션 · {quantity}장 보유</> : '아직 발견하지 못한 카드'}</span>{obtainedAt && <small>{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium' }).format(new Date(obtainedAt))} 첫 수집</small>}</div>
         </div>
       </motion.section>
