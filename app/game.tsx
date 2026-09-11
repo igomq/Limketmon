@@ -368,7 +368,7 @@ function RevealDeck({ results, onOpen }: { results: PullResult[]; onOpen: (card:
       </motion.button>
       {faceUp && result.isNew && <motion.span className="new-label" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>NEW DISCOVERY</motion.span>}
     </motion.div>
-  </div><div className="reveal-caption" aria-live="polite"><strong>{faceUp ? cardTitle(result.card) : '어떤 카드일까요?'}</strong><span>{faceUp ? `${result.card.rarity} · ${result.isNew ? '새로운 신규 포착' : `${result.quantity}장째 수집`}` : '카드를 눌러 뒤집어보세요'}</span></div>
+  </div><div className="reveal-caption" aria-live="polite"><strong>{faceUp ? cardTitle(result.card) : '어떤 카드일까요?'}</strong><span>{faceUp ? `${result.card.rarity} · ${result.isNew ? '새로운 신규 포착' : `강화 재료 ${enhanceMaterials(result.quantity)}장`}` : '카드를 눌러 뒤집어보세요'}</span></div>
     <div className="deck-controls"><button className="icon-button" disabled={index === 0} onClick={() => void advance(-1)} aria-label="이전 카드"><Icon name="back" /></button><span>{index + 1}<small> / {results.length}</small></span><button className="icon-button" disabled={index === results.length - 1} onClick={() => void advance(1)} aria-label="다음 카드"><Icon name="arrow" /></button></div>
     <button className="text-button reveal-all" onClick={() => setAll(true)}>{results.length > 1 ? '한 번에 모두 보기' : '카드 바로 보기'}<Icon name="grid" /></button>
   </div>;
@@ -386,7 +386,7 @@ function CollectionView({ user, snapshot, cards, filter, onFilter, onOpen, onNav
     <p className="results-count" role="status">{visible.length}개의 카드{filter.query && ` · “${filter.query}” 검색 결과`}</p>
     {visible.length ? <div className="archive-grid">{visible.map((card) => {
       const owned = inventory.get(card.id);
-      return <div key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`}><CardButton card={card} quantity={owned?.quantity} enhanceLevel={owned?.enhanceLevel} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong><span>{owned ? <><Icon name="check" />보유 {owned.quantity}장 · 재료 {enhanceMaterials(owned.quantity)}장{owned.enhanceLevel ? ' · +' + owned.enhanceLevel : ''}</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></div>;
+      return <div key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`}><CardButton card={card} quantity={owned?.quantity} enhanceLevel={owned?.enhanceLevel} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong><span>{owned ? <><Icon name="check" />보유 중 · 강화 재료 {enhanceMaterials(owned.quantity)}장{owned.enhanceLevel ? ' · +' + owned.enhanceLevel : ''}</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></div>;
     })}</div> : <div className="empty-state"><Icon name="search" /><h2>{filter.ownership === 'owned' && !snapshot.inventory.length ? '아직 잡힌 신규가 없어요.' : '해당하는 카드가 없어요.'}</h2><p>{filter.ownership === 'owned' && !snapshot.inventory.length ? '오늘의 무료 팩에서 첫 신규를 잡아보세요.' : '다른 검색어를 쓰거나 필터를 바꿔보세요.'}</p><button className="btn btn-dark" onClick={() => { if (filter.ownership === 'owned' && !snapshot.inventory.length) onNavigate('pull'); else onFilter(defaultFilter); }}>{filter.ownership === 'owned' && !snapshot.inventory.length ? '무료 카드 열기' : '필터 초기화'}<Icon name="arrow" /></button></div>}
   </section>;
 }

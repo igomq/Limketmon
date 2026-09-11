@@ -110,7 +110,7 @@ export function CardArtwork({ interactive = false, ...props }: CardArtworkProps 
 }
 
 export function CardButton({ card, quantity = 0, enhanceLevel = 0, onClick, priority = false }: { card: Card; quantity?: number; enhanceLevel?: number; onClick: () => void; priority?: boolean }) {
-  return <button type="button" className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장 · 강화 재료 ${enhanceMaterials(quantity)}장` : '카드 미리보기'}`}><StaticCardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority={priority} /></button>;
+  return <button type="button" className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 카드 1장 · 강화 재료 ${enhanceMaterials(quantity)}장` : '카드 미리보기'}`}><StaticCardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority={priority} /></button>;
 }
 
 export function CardBack({ count = 1 }: { count?: number }) {
@@ -287,7 +287,7 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
               {note && <p className="enhance-note">{note}</p>}
             </div>
           )}
-          <div className="detail-ownership"><span>{quantity ? <><Icon name="check" />내 컬렉션 · 총 {quantity}장 · 강화 재료 {materials}장</> : '아직 발견하지 못한 카드'}</span>{obtainedAt && <small>{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium' }).format(new Date(obtainedAt))} 첫 수집</small>}</div>
+          <div className="detail-ownership"><span>{quantity ? <><Icon name="check" />내 컬렉션 · 보유 카드 1장 · 강화 재료 {materials}장</> : '아직 발견하지 못한 카드'}</span>{obtainedAt && <small>{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium' }).format(new Date(obtainedAt))} 첫 수집</small>}</div>
         </div>
         </div>
       </motion.section>
