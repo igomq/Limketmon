@@ -5,10 +5,13 @@ import type { Rarity } from '../rules.ts';
 import { abilityFor } from './abilities.ts';
 import { ELEMENTS, type CardBattleStats, type Element } from './types.ts';
 
-export const STAT_RULESET = 1;
+export const STAT_RULESET = 2;
 
 /** Extra HP per rarity. Rarity buys durability, never raw efficiency. */
-const RARITY_HP_BONUS: Record<Rarity, number> = { N: 0, R: 8, SR: 16, SSR: 26, UR: 34 };
+const RARITY_HP_BONUS: Record<Rarity, number> = { N: 0, R: 6, SR: 12, SSR: 20, UR: 26 };
+
+/** Base cards sit at 70% of catalog attack/defense so enhance has room to climb. */
+const BASE_STAT_SCALE = 0.7;
 
 /** Energy cost of the signature skill. Cheap skills fire more often, so low rarity stays viable. */
 export const RARITY_COST: Record<Rarity, number> = { N: 2, R: 3, SR: 4, SSR: 5, UR: 6 };
@@ -86,9 +89,9 @@ export function elementOf(card: Card): Element {
 
 export function battleStats(card: Card): CardBattleStats {
   return {
-    maxHp: 58 + Math.round(card.defense * 0.85) + RARITY_HP_BONUS[card.rarity],
-    atk: card.attack,
-    def: card.defense,
+    maxHp: 40 + Math.round(card.defense * 0.62) + RARITY_HP_BONUS[card.rarity],
+    atk: Math.max(1, Math.round(card.attack * BASE_STAT_SCALE)),
+    def: Math.max(1, Math.round(card.defense * BASE_STAT_SCALE)),
     spd: 10 + Math.floor(card.luck / 4),
     crit: 5 + Math.floor(card.luck / 10),
     element: elementOf(card),

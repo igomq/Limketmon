@@ -32,7 +32,8 @@ export const inventory = sqliteTable(
     userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     cardId: text('card_id').notNull(),
     quantity: integer('quantity').notNull().default(1),
-    firstObtainedAt: text('first_obtained_at').notNull()
+    firstObtainedAt: text('first_obtained_at').notNull(),
+    enhanceLevel: integer('enhance_level').notNull().default(0)
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.cardId] }),

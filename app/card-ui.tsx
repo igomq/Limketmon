@@ -1,9 +1,10 @@
 'use client';
 
 import { motion, useDragControls, useMotionTemplate, useMotionValue, useReducedMotion, useSpring, animate } from 'motion/react';
-import { useEffect, useId, useRef, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Card } from '../lib/cards';
 import { battleStats } from '../lib/battle/stats';
+import { applyEnhance, canEnhance, enhanceCost, MAX_ENHANCE } from '../lib/enhance';
 import { ELEMENT_LABEL, STATUS_LABEL, type AbilityOp } from '../lib/battle/types';
 import { cardTitle, projectedPosition } from '../lib/collection';
 
@@ -35,7 +36,7 @@ export function Brand({ children }: { children?: ReactNode }) {
   return <><span className="brand-symbol" aria-hidden="true"><i /><i /><i /><i /></span><span>limketmon<span className="brand-period">.</span></span>{children}</>;
 }
 
-export function CardArtwork({ card, quantity = 0, priority = false }: { card: Card; quantity?: number; priority?: boolean }) {
+export function CardArtwork({ card, quantity = 0, enhanceLevel = 0, priority = false }: { card: Card; quantity?: number; enhanceLevel?: number; priority?: boolean }) {
   const reduced = useReducedMotion();
   const rx = useSpring(0, gentleSpring);
   const ry = useSpring(0, gentleSpring);
@@ -70,6 +71,7 @@ export function CardArtwork({ card, quantity = 0, priority = false }: { card: Ca
       <span className="card-rarity">{card.rarity}<Icon name="sparkle" /></span>
       <div className="card-caption"><span>No. {String(card.version).padStart(3, '0')}</span><strong>{cardTitle(card)}</strong><small>{card.skillName}</small></div>
       {quantity > 1 && <span className="card-quantity">×{quantity}</span>}
+      {enhanceLevel > 0 && <span className="card-enhance">+{enhanceLevel}</span>}
       <motion.div className="card-foil" style={{ opacity: light, backgroundPosition: position }} />
       <motion.div className="card-glare" style={{ opacity: light, backgroundImage: glare }} />
       <span className="card-frame" />
@@ -77,9 +79,9 @@ export function CardArtwork({ card, quantity = 0, priority = false }: { card: Ca
   );
 }
 
-export function CardButton({ card, quantity = 0, onClick, priority = false }: { card: Card; quantity?: number; onClick: () => void; priority?: boolean }) {
+export function CardButton({ card, quantity = 0, enhanceLevel = 0, onClick, priority = false }: { card: Card; quantity?: number; enhanceLevel?: number; onClick: () => void; priority?: boolean }) {
   const reduced = useReducedMotion();
-  return <motion.button className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장` : '카드 미리보기'}`} whileHover={reduced ? undefined : { y: -5 }} whileTap={reduced ? undefined : { scale: 0.97 }} transition={spring}><CardArtwork card={card} quantity={quantity} priority={priority} /></motion.button>;
+  return <motion.button className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장` : '카드 미리보기'}`} whileHover={reduced ? undefined : { y: -5 }} whileTap={reduced ? undefined : { scale: 0.97 }} transition={spring}><CardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority={priority} /></motion.button>;
 }
 
 export function CardBack({ count = 1 }: { count?: number }) {
@@ -87,8 +89,8 @@ export function CardBack({ count = 1 }: { count?: number }) {
 }
 
 /** Battle numbers for the detail sheet. Derived from lib, so the sheet never re-implements rules. */
-function BattleCardPanel({ card }: { card: Card }) {
-  const stats = battleStats(card);
+function BattleCardPanel({ card, enhanceLevel = 0 }: { card: Card; enhanceLevel?: number }) {
+  const stats = applyEnhance(battleStats(card), enhanceLevel);
   const rows: Array<[string, string]> = [
     ['체력', String(stats.maxHp)],
     ['공격', String(stats.atk)],
@@ -138,13 +140,14 @@ function describeOps(ops: readonly AbilityOp[]): string {
     .join(' · ');
 }
 
-export function CardDetail({ card, quantity, obtainedAt, onClose }: { card: Card; quantity: number; obtainedAt?: string; onClose: () => void }) {
+export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnhance, enhancing, onClose }: { card: Card; quantity: number; enhanceLevel?: number; obtainedAt?: string; onEnhance?: (cardId: string) => Promise<void>; enhancing?: boolean; onClose: () => void }) {
   const reduced = useReducedMotion();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const drag = useDragControls();
   const y = useMotionValue(0);
   const dragged = useRef(false);
+  const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -164,13 +167,39 @@ export function CardDetail({ card, quantity, obtainedAt, onClose }: { card: Card
       >
         <button className="sheet-handle" aria-label="아래로 끌어 닫기, 또는 눌러 닫기" onPointerDown={(event) => { dragged.current = false; drag.start(event); }} onClick={(event) => { if (!dragged.current || event.detail === 0) onClose(); }}><span /></button>
         <button className="icon-button detail-close" autoFocus onClick={onClose} aria-label="카드 상세 닫기"><Icon name="close" /></button>
-        <div className="detail-art"><CardArtwork card={card} quantity={quantity} priority /><p><Icon name="hand" />카드에 손을 대고 빛을 움직여 보세요</p></div>
+        <div className="detail-art"><CardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority /><p><Icon name="hand" />카드에 손을 대고 빛을 움직여 보세요</p></div>
         <div className="detail-copy"><div className="detail-meta"><span className={`rarity-tag rarity-${card.rarity}`}>{card.rarity}</span><span>NO. {String(card.version).padStart(3, '0')} / ORIGINALS</span></div>
           <h2 id={titleId}>{cardTitle(card)}</h2><p className="detail-name">{card.name}</p>
           <div className="skill-block"><span className="eyebrow">SPECIAL ABILITY</span><h3>{card.skillName}</h3><p>{card.skillDescription}</p></div>
           <blockquote>“{card.flavorText}”</blockquote>
           <dl className="card-stats">{[['공격', card.attack], ['방어', card.defense], ['행운', card.luck]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}<span>/ 100</span></dd><div className="stat-track" aria-hidden="true"><motion.i initial={{ scaleX: reduced ? Number(value) / 100 : 0 }} animate={{ scaleX: Number(value) / 100 }} transition={{ ...spring, delay: reduced ? 0 : 0.15 }} /></div></div>)}</dl>
-          <BattleCardPanel card={card} />
+          <BattleCardPanel card={card} enhanceLevel={enhanceLevel} />
+          {quantity > 0 && (
+            <div className="enhance-panel">
+              <span className="eyebrow">ENHANCE</span>
+              <p>같은 카드를 소모해 전투 수치를 올립니다. 단계가 오를수록 더 많이 필요합니다.</p>
+              <p className="enhance-level">{enhanceLevel ? '강화 +' + enhanceLevel + ' / +' + MAX_ENHANCE : '아직 강화하지 않음'}</p>
+              {onEnhance ? (
+                <button
+                  type="button"
+                  className="btn btn-dark"
+                  disabled={enhancing || !canEnhance(quantity, enhanceLevel)}
+                  onClick={async () => {
+                    setNote(null);
+                    try {
+                      await onEnhance(card.id);
+                      setNote('강화했어요.');
+                    } catch (error) {
+                      setNote(error instanceof Error ? error.message : '강화하지 못했어요.');
+                    }
+                  }}
+                >
+                  {enhanceLevel >= MAX_ENHANCE ? '최대 강화' : canEnhance(quantity, enhanceLevel) ? '강화 +' + (enhanceLevel + 1) + ' · ' + enhanceCost(enhanceLevel) + '장 소모' : '같은 카드 ' + enhanceCost(enhanceLevel) + '장 필요'}
+                </button>
+              ) : null}
+              {note && <p className="enhance-note">{note}</p>}
+            </div>
+          )}
           <div className="detail-ownership"><span>{quantity ? <><Icon name="check" />내 컬렉션 · {quantity}장 보유</> : '아직 발견하지 못한 카드'}</span>{obtainedAt && <small>{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium' }).format(new Date(obtainedAt))} 첫 수집</small>}</div>
         </div>
       </motion.section>

@@ -119,6 +119,7 @@ function play(setup: Awaited<ReturnType<typeof game.startBattle>>) {
       modifier: setup.modifier,
       seed: setup.seed,
       playerCardIds: setup.player.map((entry) => entry.cardId),
+      playerEnhance: setup.player.map((entry: { enhance?: number }) => entry.enhance ?? 0),
       battleId: setup.battleId
     });
     const profile = opponentById(setup.opponentId)!.profile;

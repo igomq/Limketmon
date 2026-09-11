@@ -36,7 +36,7 @@ test('parallel pulls cannot farm the hard pity', async () => {
   reset();
   // Today's free pull is already spent, so every successful pull costs exactly one credit.
   await db.prepare('UPDATE user_game_state SET pity_counter = ?, pull_credits = 100, last_free_pull_date = ? WHERE user_id = ?')
-    .bind(59, kstDate(DAY), USER)
+    .bind(59, kstDate(new Date()), USER)
     .run();
   // Ten pulls fired at once. Without the compare-and-set every one of them reads counter 59 and
   // the hard-pity guarantee fires ten times.
@@ -72,7 +72,7 @@ test('a concurrent read cannot make a committed pull fail or double-create start
   // can both try it at once.
   seedOwned(db, USER, cardIdsByRarity({ N: 2 }));
   // Consume the free pull first: a count-1 pull is free until today's date is recorded.
-  await db.prepare('UPDATE user_game_state SET pull_credits = 20, last_free_pull_date = ? WHERE user_id = ?').bind(kstDate(DAY), USER).run();
+  await db.prepare('UPDATE user_game_state SET pull_credits = 20, last_free_pull_date = ? WHERE user_id = ?').bind(kstDate(new Date()), USER).run();
   const [pull, snapshot, second] = await Promise.all([
     game.pullCards(USER, 1),
     game.getSnapshot(USER, DAY),

@@ -15,6 +15,13 @@
       "when": 1789020064074,
       "tag": "0001_lucky_xavin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789100496000,
+      "tag": "0002_card_enhance",
+      "breakpoints": true
     }
   ]
 }

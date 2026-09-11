@@ -47,6 +47,7 @@ test('every migration applies to a fresh database and creates the full schema', 
     assert.ok(columns(sql, 'battles').includes('summary'));
     assert.ok(columns(sql, 'battles').includes('clutch'));
     assert.ok(columns(sql, 'battles').includes('ruleset_version'));
+    assert.ok(columns(sql, 'inventory').includes('enhance_level'));
     const defaults = new Map(
       (sql.prepare('PRAGMA table_info(battles)').all() as Array<{ name: string; dflt_value: string | null }>).map((row) => [row.name, row.dflt_value])
     );
@@ -88,6 +89,7 @@ test('migrations are additive: existing rows and tables survive the upgrade', ()
     assert.equal(state.last_free_pull_date, '2026-09-09', 'the KST free-pull date survives');
     assert.equal(state.pity_counter, 0, 'existing accounts start with a clean pity counter');
     assert.equal((sql.prepare('SELECT quantity FROM inventory WHERE user_id = ?').get('u1') as { quantity: number }).quantity, 3);
+    assert.equal((sql.prepare('SELECT enhance_level FROM inventory WHERE user_id = ?').get('u1') as { enhance_level: number }).enhance_level, 0);
     assert.equal((sql.prepare('SELECT COUNT(*) AS c FROM pull_history').get() as { c: number }).c, 1);
     assert.equal((sql.prepare('SELECT COUNT(*) AS c FROM coupon_redemptions').get() as { c: number }).c, 1);
   } finally {

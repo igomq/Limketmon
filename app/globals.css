@@ -16,6 +16,7 @@
   font-optical-sizing: auto;
 }
 * { box-sizing: border-box; }
+.app-shell { position: relative; }
 html { min-width: 320px; background: var(--bg); scrollbar-gutter: stable; scroll-padding-top: 7rem; }
 body { margin: 0; color: var(--ink); font-size: 1rem; line-height: 1.6; -webkit-font-smoothing: antialiased; }
 button, input, select { font: inherit; }
@@ -105,10 +106,11 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
 .card-caption > span { display: block; font-size: .75rem; margin-bottom: .45rem; color: #fff; opacity: .8; letter-spacing: .04em; }
 .card-caption strong { display: block; font-size: clamp(.95rem, 1.5vw, 1.3rem); font-weight: 700; letter-spacing: -.035em; word-break: keep-all; }
 .card-caption small { display: block; font-size: .75rem; margin-top: .4rem; color: #e1e3e7; }
-.card-quantity { position: absolute; right: 1rem; top: 2.3rem; color: white; background: #00000075; border-radius: .4rem; padding: .15rem .4rem; font-size: .75rem; }
+.card-quantity, .card-enhance { position: absolute; right: 1rem; top: 2.3rem; color: white; background: #00000075; border-radius: .4rem; padding: .15rem .4rem; font-size: .75rem; }
+.card-enhance { top: 3.85rem; }
 .card-frame { position: absolute; z-index: 7; inset: 6px; border: 1px solid #ffffff5c; border-radius: .75rem; pointer-events: none; }
 .card-foil, .card-glare { position: absolute; z-index: 4; inset: 0; pointer-events: none; border-radius: inherit; opacity: 0; }
-.card-edition, .card-rarity, .card-caption, .card-quantity { z-index: 6; pointer-events: none; }
+.card-edition, .card-rarity, .card-caption, .card-quantity, .card-enhance { z-index: 6; pointer-events: none; }
 .card-foil { background-image: repeating-linear-gradient(115deg, #e493ff 0%, #86deff 12%, #a4ffc2 24%, #fff19c 36%, #ffa6a1 48%, #e493ff 60%); background-size: 350% 350%; mix-blend-mode: color-dodge; filter: brightness(.55) contrast(1.3); }
 .card-glare { z-index: 5; mix-blend-mode: soft-light; }
 .rarity-N { --rarity: #626b78; --foil: #e4e8ef; }
@@ -369,10 +371,20 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
   .pull-layout { gap: 2rem; }
   .coupon-layout { gap: 3rem; }
 }
+
+@media (max-width: 1024px) {
+  html { scroll-padding-bottom: 6.5rem; }
+  .page { padding-bottom: 7.5rem; }
+  .footer { padding-bottom: calc(7.5rem + env(safe-area-inset-bottom)); }
+  .main-nav { position: fixed; left: 1rem; right: 1rem; bottom: max(1rem, env(safe-area-inset-bottom)); top: auto; transform: none; z-index: 50; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: .4rem; border: 1px solid #ffffffcc; border-radius: 1.4rem; background: #ebedf0e6; backdrop-filter: blur(24px) saturate(170%); -webkit-backdrop-filter: blur(24px) saturate(170%); box-shadow: 0 6px 30px #2021261a, 0 1px 3px #20212608; }
+  .main-nav button { min-height: 3.3rem; border-radius: 1rem; min-width: 0; padding: .35rem; font-size: .75rem; }
+  .nav-label { flex-direction: column; gap: .12rem; }
+  .nav-label .icon { display: block; width: 1.1rem; height: 1.1rem; }
+  .nav-indicator { border-radius: 1rem; }
+  .nav-dot { right: calc(50% - 1rem); top: .55rem; }
+}
 @media (max-width: 800px) {
   .topbar-inner { min-height: 5rem; }
-  .main-nav button { min-width: 4rem; padding: .5rem .7rem; }
-  .nav-label .icon { display: none; }
   .brand { font-size: 1.4rem; }
   .discovery-hero { gap: 1rem; min-height: 27rem; padding-top: 0; }
   .hero-gallery { height: 23rem; }
@@ -421,15 +433,9 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
 @media (max-width: 640px) {
   html { scroll-padding-top: 5.5rem; }
   .page, .footer, .topbar-inner { width: calc(100% - 2.5rem); }
-  .page { padding-top: 1.5rem; padding-bottom: 3rem; }
+  .page { padding-top: 1.5rem; padding-bottom: 7.5rem; }
   .topbar-inner { min-height: 4.5rem; }
   .brand { font-size: 1.5rem; }
-  .main-nav { position: fixed; left: 1rem; right: 1rem; bottom: max(1rem, env(safe-area-inset-bottom)); z-index: 50; display: grid; grid-template-columns: repeat(4, 1fr); padding: .4rem; border: 1px solid #ffffffcc; border-radius: 1.4rem; background: #ebedf0e6; backdrop-filter: blur(24px) saturate(170%); -webkit-backdrop-filter: blur(24px) saturate(170%); box-shadow: 0 6px 30px #2021261a, 0 1px 3px #20212608; }
-  .main-nav button { min-height: 3.3rem; border-radius: 1rem; min-width: 0; padding: .35rem; font-size: .75rem; }
-  .nav-label { flex-direction: column; gap: .12rem; }
-  .nav-label .icon { display: block; width: 1.1rem; height: 1.1rem; }
-  .nav-indicator { border-radius: 1rem; }
-  .nav-dot { right: calc(50% - 1rem); top: .55rem; }
   .account-area { gap: .3rem; }
   .account-area .icon-button { width: 2rem; height: 2.75rem; }
   .credit-pill { font-size: .875rem; }

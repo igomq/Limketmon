@@ -367,3 +367,12 @@
   .replay-verb { flex: 0 0 3.25rem; }
 }
 
+
+.enhance-panel { margin: 0 0 1.5rem; padding: 1.1rem 1.25rem; border: 1px solid var(--line); border-radius: .85rem; background: #fbfbfc; }
+.enhance-panel > p { margin: .45rem 0 0; color: var(--secondary); font-size: .875rem; line-height: 1.7; }
+.enhance-level { font-weight: 650; color: var(--ink) !important; }
+.enhance-panel .btn { width: 100%; margin-top: .9rem; }
+.enhance-note { margin-top: .7rem; font-size: .8125rem; font-weight: 600; color: var(--ink); }
+@media (max-width: 640px) {
+  .enhance-panel { padding: 1rem; }
+}

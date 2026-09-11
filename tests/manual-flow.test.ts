@@ -67,7 +67,7 @@ test("manual verification checklist", async () => {
 
   const full = buildSetup({
     kind: setup.kind, opponentId: setup.opponentId, modifier: setup.modifier, seed: setup.seed,
-    playerCardIds: setup.player.map((entry: { cardId: string }) => entry.cardId), battleId: setup.battleId
+    playerCardIds: setup.player.map((entry: { cardId: string }) => entry.cardId), playerEnhance: setup.player.map((entry: { enhance?: number }) => entry.enhance ?? 0), battleId: setup.battleId
   });
   const profile = opponentById(setup.opponentId)!.profile;
   let battle = createBattle(full);

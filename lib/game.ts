@@ -11,6 +11,7 @@ import { planBattleRewards, pveFirstClearClaimKey } from './rewards';
 import { summarizeBattles, type BattleRow } from './stats';
 import { CATALOG, buildSetup, CARD_BY_ID } from './battle/setup';
 import { battleStats } from './battle/stats';
+import { applyEnhance, clampEnhance, enhanceCost, MAX_ENHANCE, parseDeckSlots } from './enhance';
 import { BATTLE_RULESET_VERSION, type BattleEvent, type BattleModifier, type BattleState, type Decision } from './battle/types';
 import { OPPONENTS, opponentById } from './battle/opponents';
 import { aiDecision } from './battle/ai';
@@ -23,7 +24,7 @@ export interface Snapshot {
   freeAvailable: boolean;
   credits: number;
   completion: number;
-  inventory: Array<{ cardId: string; quantity: number; firstObtainedAt: string }>;
+  inventory: Array<{ cardId: string; quantity: number; firstObtainedAt: string; enhanceLevel: number }>;
   /** Pulls remaining before the hard pity guarantee. */
   pityRemaining: number;
   decks: DeckSummary[];
@@ -129,7 +130,7 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
   const [stateResult, inventoryResult, deckResult, claimResult, battleResult, achievementResult, pullResult] = await db.batch([
     db.prepare('SELECT pull_credits, last_free_pull_date, pity_counter FROM user_game_state WHERE user_id = ?').bind(userId),
     db.prepare(`
-      SELECT card_id, quantity, first_obtained_at
+      SELECT card_id, quantity, first_obtained_at, enhance_level
       FROM inventory WHERE user_id = ? ORDER BY card_id
     `).bind(userId),
     db.prepare(`
@@ -153,6 +154,7 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     card_id: string;
     quantity: number;
     first_obtained_at: string;
+    enhance_level: number;
   }>;
   const owned = inventory.length;
   const pityCounter = Number(state?.pity_counter ?? 0);
@@ -239,7 +241,8 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     inventory: inventory.map((item) => ({
       cardId: item.card_id,
       quantity: item.quantity,
-      firstObtainedAt: item.first_obtained_at
+      firstObtainedAt: item.first_obtained_at,
+      enhanceLevel: clampEnhance(Number(item.enhance_level ?? 0))
     }))
   };
 }
@@ -261,13 +264,7 @@ function recentBattles(rows: unknown): BattleSummaryRow[] {
 }
 
 function safeCards(raw: unknown): string[] {
-  if (typeof raw !== 'string') return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
-  } catch {
-    return [];
-  }
+  return parseDeckSlots(raw).map((slot) => slot.id);
 }
 
 
@@ -334,6 +331,31 @@ export async function redeemCoupon(userId: string, rawCode: string): Promise<Sna
   }
 
   return getSnapshot(userId);
+}
+
+export async function enhanceCard(userId: string, rawCardId: unknown): Promise<Snapshot> {
+  if (typeof rawCardId !== 'string' || !CARD_BY_ID.has(rawCardId)) {
+    throw new GameError('invalid_card', '카드를 찾을 수 없습니다.');
+  }
+  const db = getDatabase();
+  const sql = 'UPDATE inventory SET quantity = quantity - ?, enhance_level = enhance_level + 1 WHERE user_id = ? AND card_id = ? AND enhance_level = ? AND quantity = ? AND enhance_level < ? AND quantity - ? >= 1';
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const row = (await db
+      .prepare('SELECT quantity, enhance_level FROM inventory WHERE user_id = ? AND card_id = ?')
+      .bind(userId, rawCardId)
+      .first()) as { quantity: number; enhance_level: number } | null;
+    if (!row) throw new GameError('not_owned', '아직 없는 카드예요.');
+    const level = clampEnhance(Number(row.enhance_level ?? 0));
+    const quantity = Number(row.quantity);
+    if (level >= MAX_ENHANCE) throw new GameError('max_enhance', '이미 최대 강화예요.');
+    const cost = enhanceCost(level);
+    if (quantity - cost < 1) {
+      throw new GameError('not_enough_copies', '같은 카드가 ' + String(cost) + '장 더 필요해요. 한 장은 남겨 둡니다.');
+    }
+    const updated = await db.prepare(sql).bind(cost, userId, rawCardId, level, quantity, MAX_ENHANCE, cost).run();
+    if (Number((updated.meta as { changes?: number }).changes ?? 0)) return getSnapshot(userId);
+  }
+  throw new GameError('enhance_busy', '다른 강화가 먼저 처리됐어요. 다시 시도해주세요.');
 }
 
 function randomUnit(): number {
@@ -530,31 +552,50 @@ export async function setDefaultDeck(userId: string, deckId: string): Promise<De
  */
 export async function autoDeck(userId: string, deckId?: unknown, now = new Date()): Promise<DeckSummary[]> {
   const db = getDatabase();
-  const owned = [...(await ownedCards(userId))];
-  if (owned.length < DECK_SIZE) {
-    throw new GameError('not_enough_cards', `추천 덱을 만들려면 카드가 ${DECK_SIZE}장 필요해요.`);
+  const rows = (await db
+    .prepare('SELECT card_id, enhance_level FROM inventory WHERE user_id = ?')
+    .bind(userId)
+    .all()).results as Array<{ card_id: string; enhance_level: number }>;
+  if (rows.length < DECK_SIZE) {
+    throw new GameError('not_enough_cards', '추천 덱을 만들려면 카드가 ' + String(DECK_SIZE) + '장 필요해요.');
   }
-  const picked = owned.sort(compareBattlePower).slice(0, DECK_SIZE);
+  const picked = [...rows]
+    .sort((left, right) =>
+      compareBattlePower(left.card_id, right.card_id, Number(left.enhance_level), Number(right.enhance_level))
+    )
+    .slice(0, DECK_SIZE)
+    .map((row) => row.card_id);
   if (typeof deckId === 'string' && deckId) return saveDeck(userId, deckId, picked, now);
   return createDeck(userId, '추천 덱', picked);
 }
 
 /** Highest battle value first, then rarity, then catalog order. Ties are never arbitrary. */
-function compareBattlePower(leftId: string, rightId: string): number {
+function compareBattlePower(leftId: string, rightId: string, leftLv = 0, rightLv = 0): number {
   const left = CARD_BY_ID.get(leftId);
   const right = CARD_BY_ID.get(rightId);
   if (!left || !right) return leftId.localeCompare(rightId);
-  const power = (card: Card) => {
-    const stats = battleStats(card);
+  const power = (card: Card, level: number) => {
+    const stats = applyEnhance(battleStats(card), level);
     return stats.maxHp + stats.atk * 2 + stats.def + stats.spd * 2;
   };
-  return power(right) - power(left) || left.version - right.version;
+  return power(right, rightLv) - power(left, leftLv) || left.version - right.version;
 }
 
 async function ownedCards(userId: string): Promise<Set<string>> {
   const db = getDatabase();
   const result = await db.prepare('SELECT card_id FROM inventory WHERE user_id = ?').bind(userId).all();
   return new Set((result.results as Array<{ card_id: string }>).map((row) => row.card_id));
+}
+
+async function enhanceLevelsFor(userId: string): Promise<Map<string, number>> {
+  const db = getDatabase();
+  const result = await db.prepare('SELECT card_id, enhance_level FROM inventory WHERE user_id = ?').bind(userId).all();
+  return new Map(
+    (result.results as Array<{ card_id: string; enhance_level: number }>).map((row) => [
+      row.card_id,
+      clampEnhance(Number(row.enhance_level ?? 0))
+    ])
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -649,7 +690,8 @@ function parseDecisions(raw: string): Decision[] {
 
 function setupFromRow(row: BattleRowFull) {
   const opponent = opponentById(row.opponent_id);
-  const cardIds = safeCards(row.deck_cards);
+  const slots = parseDeckSlots(row.deck_cards);
+  const cardIds = slots.map((slot) => slot.id);
   if (!opponent || cardIds.length !== DECK_SIZE) return null;
   return buildSetup({
     kind: row.kind === 'daily' ? 'daily' : 'pve',
@@ -657,6 +699,7 @@ function setupFromRow(row: BattleRowFull) {
     modifier: parseModifier(row.modifier),
     seed: Number(row.seed),
     playerCardIds: cardIds,
+    playerEnhance: slots.map((slot) => slot.enhance),
     battleId: row.id
   });
 }
@@ -710,7 +753,9 @@ export async function startBattle(
 
   const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const battleId = crypto.randomUUID();
-  const setup = buildSetup({ kind, opponentId, modifier, seed, playerCardIds: validated.cards, battleId });
+  const levels = await enhanceLevelsFor(userId);
+  const snapshot = validated.cards.map((id) => ({ id, lv: levels.get(id) ?? 0 }));
+  const setup = buildSetup({ kind, opponentId, modifier, seed, playerCardIds: validated.cards, playerEnhance: snapshot.map((slot) => slot.lv), battleId });
   const opponent = opponentById(opponentId)!;
 
   // Keep the table bounded: an authenticated client could otherwise open battles forever.
@@ -731,7 +776,7 @@ export async function startBattle(
     deckRow.id,
     BATTLE_RULESET_VERSION,
     seed,
-    JSON.stringify(validated.cards),
+    JSON.stringify(snapshot),
     JSON.stringify(modifier),
     kst,
     now.toISOString()

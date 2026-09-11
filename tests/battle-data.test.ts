@@ -16,16 +16,17 @@ const cardById = (id: string): Card => {
   assert.ok(card, `unknown card ${id}`);
   return card;
 };
-const RARITY_HP_BONUS: Record<Card['rarity'], number> = { N: 0, R: 8, SR: 16, SSR: 26, UR: 34 };
+const RARITY_HP_BONUS: Record<Card['rarity'], number> = { N: 0, R: 6, SR: 12, SSR: 20, UR: 26 };
+const BASE_STAT_SCALE = 0.7;
 
 test('stats: every curated card derives stats inside the documented bands', () => {
   assert.equal(cards.length, 46);
   for (const card of cards) {
     const stats = battleStats(card);
-    assert.equal(stats.atk, card.attack, card.id);
-    assert.equal(stats.def, card.defense, card.id);
-    assert.equal(stats.maxHp, 58 + Math.round(card.defense * 0.85) + RARITY_HP_BONUS[card.rarity], card.id);
-    assert.ok(stats.maxHp >= 59 && stats.maxHp <= 177, `${card.id} maxHp ${stats.maxHp}`);
+    assert.equal(stats.atk, Math.max(1, Math.round(card.attack * BASE_STAT_SCALE)), card.id);
+    assert.equal(stats.def, Math.max(1, Math.round(card.defense * BASE_STAT_SCALE)), card.id);
+    assert.equal(stats.maxHp, 40 + Math.round(card.defense * 0.62) + RARITY_HP_BONUS[card.rarity], card.id);
+    assert.ok(stats.maxHp >= 50 && stats.maxHp <= 140, `${card.id} maxHp ${stats.maxHp}`);
     assert.equal(stats.spd, 10 + Math.floor(card.luck / 4), card.id);
     assert.ok(stats.spd >= 10 && stats.spd <= 35, `${card.id} spd`);
     assert.ok(stats.crit >= 5 && stats.crit <= 15, `${card.id} crit`);
@@ -35,7 +36,7 @@ test('stats: every curated card derives stats inside the documented bands', () =
 });
 
 test('stats: ability identity is stable and keeps the curated Korean copy', () => {
-  assert.equal(STAT_RULESET, 1);
+  assert.equal(STAT_RULESET, 2);
   assert.equal(ABILITY_RULESET, 2);
   for (const card of cards) {
     const { ability } = battleStats(card);

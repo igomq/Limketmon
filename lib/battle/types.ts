@@ -6,8 +6,9 @@ import type { Rarity } from '../rules.ts';
 /**
  * Bumped whenever a rule change can alter the outcome of a battle for the same seed + decisions.
  * 2: energy regen 1/turn, round cap 40, wounded-only N self-heal.
+ * 3: lower base card stats; player enhance levels are snapshotted into the battle.
  */
-export const BATTLE_RULESET_VERSION = 2;
+export const BATTLE_RULESET_VERSION = 3;
 
 export const ELEMENTS = ['light', 'shadow', 'iron', 'nature', 'spark'] as const;
 export type Element = (typeof ELEMENTS)[number];
@@ -140,6 +141,8 @@ export interface CombatantSeed {
   spd: number;
   crit: number;
   ability: Ability;
+  /** Player-side duplicate enhance. Omitted or 0 for opponents and old snapshots. */
+  enhance?: number;
 }
 
 export interface BattleSetup {

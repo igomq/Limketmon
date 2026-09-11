@@ -116,6 +116,23 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
     }
   }
 
+
+  async function enhance(cardId: string) {
+    if (inFlight.current || !user) throw new Error('잠시 후 다시 시도해주세요.');
+    inFlight.current = true;
+    mutation.current += 1;
+    setBusy(true);
+    try {
+      const response = await fetch('/api/enhance', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cardId }) });
+      const data = await response.json() as { error?: string; snapshot?: Snapshot };
+      if (!response.ok || !data.snapshot) throw new Error(data.error || '강화하지 못했어요. 다시 시도해주세요.');
+      setSnapshot(data.snapshot);
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
   async function redeem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (inFlight.current || !user) return;
@@ -148,8 +165,10 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
           {item.id === 'pull' && user && snapshot.freeAvailable && <i className="nav-dot" aria-label="무료 뽑기 가능" />}
           {item.id === 'battle' && user && !snapshot.daily.cleared && <i className="nav-dot" aria-label="오늘의 도전 남음" />}
         </motion.button>)}</nav>
+        
         <div className="account-area">{user ? <><button type="button" className="text-button credit-pill" onClick={() => navigate('coupon')} title="쿠폰으로 뽑기권 받기"><Icon name="ticket" /><strong>{snapshot.credits.toLocaleString('ko-KR')}</strong><span className="sr-only">뽑기권, 쿠폰 입력으로 받기</span></button><a className="icon-button" href="/signout-with-chatgpt?return_to=%2F" aria-label="로그아웃" title="로그아웃"><Icon name="logout" /></a></> : <a className="sign-in-link" href={signIn(tab)}>로그인<Icon name="arrow" /></a>}</div>
       </div></header>
+      
       <main id="content" ref={content} tabIndex={-1} className="page">
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.div key={tab} className="view-stage" initial={{ opacity: 0, y: reduced ? 0 : 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ ...gentleSpring, opacity: { duration: 0.12 } }}>
@@ -165,7 +184,7 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
         {feedback && tab !== 'coupon' && <p className={`feedback ${feedback.error ? 'error' : 'success'}`} role={feedback.error ? 'alert' : 'status'}><Icon name={feedback.error ? 'clock' : 'check'} />{feedback.text}</p>}
       </main>
       <footer className="footer"><span>limketmon. <span>이 정도면 우정입니다.</span></span><span>ORIGINAL COLLECTION · {cards.length} CARDS</span></footer>
-      <AnimatePresence>{selected && <CardDetail key={selected.id} card={selected} quantity={inventory.get(selected.id)?.quantity ?? 0} obtainedAt={inventory.get(selected.id)?.firstObtainedAt} onClose={() => setSelected(null)} />}</AnimatePresence>
+      <AnimatePresence>{selected && <CardDetail key={selected.id} card={selected} quantity={inventory.get(selected.id)?.quantity ?? 0} enhanceLevel={inventory.get(selected.id)?.enhanceLevel ?? 0} obtainedAt={inventory.get(selected.id)?.firstObtainedAt} onEnhance={user ? enhance : undefined} enhancing={busy} onClose={() => setSelected(null)} />}</AnimatePresence>
     </div>
   );
 }
@@ -299,7 +318,7 @@ function CollectionView({ user, snapshot, cards, filter, onFilter, onOpen, onNav
     <p className="results-count" role="status">{visible.length}개의 카드{filter.query && ` · “${filter.query}” 검색 결과`}</p>
     {visible.length ? <motion.div className="archive-grid" layout={reduced ? false : 'position'}>{visible.map((card) => {
       const owned = inventory.get(card.id);
-      return <motion.div layout={reduced ? false : 'position'} key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ ...spring, opacity: { duration: 0.2 } }}><CardButton card={card} quantity={owned?.quantity} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong><span>{owned ? <><Icon name="check" />보유 {owned.quantity}장</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></motion.div>;
+      return <motion.div layout={reduced ? false : 'position'} key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ ...spring, opacity: { duration: 0.2 } }}><CardButton card={card} quantity={owned?.quantity} enhanceLevel={owned?.enhanceLevel} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong><span>{owned ? <><Icon name="check" />보유 {owned.quantity}장{owned.enhanceLevel ? ' · +' + owned.enhanceLevel : ''}</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></motion.div>;
     })}</motion.div> : <div className="empty-state"><Icon name="search" /><h2>{filter.ownership === 'owned' && !snapshot.inventory.length ? '아직 잡힌 신규가 없어요.' : '해당하는 카드가 없어요.'}</h2><p>{filter.ownership === 'owned' && !snapshot.inventory.length ? '오늘의 무료 팩에서 첫 신규를 잡아보세요.' : '다른 검색어를 쓰거나 필터를 바꿔보세요.'}</p><button className="btn btn-dark" onClick={() => { if (filter.ownership === 'owned' && !snapshot.inventory.length) onNavigate('pull'); else onFilter(defaultFilter); }}>{filter.ownership === 'owned' && !snapshot.inventory.length ? '무료 카드 열기' : '필터 초기화'}<Icon name="arrow" /></button></div>}
   </section>;
 }
