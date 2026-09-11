@@ -90,21 +90,22 @@ export function CardBack({ count = 1 }: { count?: number }) {
 
 /** Battle numbers for the detail sheet. Derived from lib, so the sheet never re-implements rules. */
 function BattleCardPanel({ card, enhanceLevel = 0 }: { card: Card; enhanceLevel?: number }) {
-  const stats = applyEnhance(battleStats(card), enhanceLevel);
-  const rows: Array<[string, string]> = [
-    ['체력', String(stats.maxHp)],
-    ['공격', String(stats.atk)],
-    ['방어', String(stats.def)],
-    ['속도', String(stats.spd)],
-    ['치명타', stats.crit + '%'],
-    ['속성', ELEMENT_LABEL[stats.element]]
+  const base = battleStats(card);
+  const stats = applyEnhance(base, enhanceLevel);
+  const rows: Array<[string, string, number]> = [
+    ['체력', String(stats.maxHp), stats.maxHp - base.maxHp],
+    ['공격', String(stats.atk), stats.atk - base.atk],
+    ['방어', String(stats.def), stats.def - base.def],
+    ['속도', String(stats.spd), stats.spd - base.spd],
+    ['치명타', stats.crit + '%', stats.crit - base.crit],
+    ['속성', ELEMENT_LABEL[stats.element], 0]
   ];
   return (
     <div className="battle-card-panel">
-      <span className="eyebrow">BATTLE PROFILE</span>
+      <span className="eyebrow">BATTLE PROFILE{enhanceLevel ? ' · +' + enhanceLevel : ''}</span>
       <dl className="battle-card-stats">
-        {rows.map(([label, value]) => (
-          <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+        {rows.map(([label, value, delta]) => (
+          <div key={label}><dt>{label}</dt><dd>{value}{delta > 0 ? <span className="stat-delta">+{delta}</span> : null}</dd></div>
         ))}
       </dl>
       <p className="battle-card-skill">
@@ -160,13 +161,15 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
 
   return (
     <motion.dialog ref={dialog} className="detail-dialog" aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+      <button type="button" className="icon-button detail-back" autoFocus onClick={onClose} aria-label="뒤로가기"><Icon name="back" /></button>
       <motion.section
         className={`detail-sheet rarity-${card.rarity}`} style={{ y }} drag={reduced ? false : 'y'} dragControls={drag} dragListener={false} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0.05, bottom: 0.6 }} dragTransition={{ bounceStiffness: 360, bounceDamping: 34 }}
         onDragStart={() => { dragged.current = true; }} onDragEnd={(_, info) => { if (info.velocity.y >= 0 && projectedPosition(y.get(), info.velocity.y) > 140) onClose(); else animate(y, 0, { ...spring, velocity: info.velocity.y }); }}
         initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }} transition={spring}
       >
         <button className="sheet-handle" aria-label="아래로 끌어 닫기, 또는 눌러 닫기" onPointerDown={(event) => { dragged.current = false; drag.start(event); }} onClick={(event) => { if (!dragged.current || event.detail === 0) onClose(); }}><span /></button>
-        <button className="icon-button detail-close" autoFocus onClick={onClose} aria-label="카드 상세 닫기"><Icon name="close" /></button>
+        <div className="detail-scroll">
+        
         <div className="detail-art"><CardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority /><p><Icon name="hand" />카드에 손을 대고 빛을 움직여 보세요</p></div>
         <div className="detail-copy"><div className="detail-meta"><span className={`rarity-tag rarity-${card.rarity}`}>{card.rarity}</span><span>NO. {String(card.version).padStart(3, '0')} / ORIGINALS</span></div>
           <h2 id={titleId}>{cardTitle(card)}</h2><p className="detail-name">{card.name}</p>
@@ -201,6 +204,7 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
             </div>
           )}
           <div className="detail-ownership"><span>{quantity ? <><Icon name="check" />내 컬렉션 · {quantity}장 보유</> : '아직 발견하지 못한 카드'}</span>{obtainedAt && <small>{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium' }).format(new Date(obtainedAt))} 첫 수집</small>}</div>
+        </div>
         </div>
       </motion.section>
     </motion.dialog>
