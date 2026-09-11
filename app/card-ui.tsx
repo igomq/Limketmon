@@ -3,10 +3,13 @@
 import { motion, useDragControls, useMotionTemplate, useMotionValue, useReducedMotion, useSpring, animate } from 'motion/react';
 import { memo, useEffect, useId, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Card } from '../lib/cards';
-import { battleStats } from '../lib/battle/stats';
+import { catalogCard, battleStats } from '../lib/battle/stats';
 import { enhanceSkillsForCard, scaleAbility } from '../lib/battle/enhance-skills';
-import { applyEnhance, canEnhance, enhanceCost, enhanceMaterials, MAX_ENHANCE } from '../lib/enhance';
-import { ELEMENT_LABEL, STATUS_LABEL, type AbilityOp, type CardBattleStats } from '../lib/battle/types';
+import { applyEnhance, enhanceCost, enhanceMaterials, MAX_ENHANCE } from '../lib/enhance';
+import { ELEMENT_LABEL, STATUS_LABEL, type AbilityOp, type CardBattleStats, type Element } from '../lib/battle/types';
+import * as battleTypes from '../lib/battle/types';
+import type { Rarity } from '../lib/rules';
+import type { CardProgress, Trait } from '../lib/progression';
 import { cardTitle, projectedPosition } from '../lib/collection';
 
 export const spring = { type: 'spring' as const, stiffness: 360, damping: 34, mass: 0.9 };
@@ -37,15 +40,71 @@ export function Brand({ children }: { children?: ReactNode }) {
   return <><span className="brand-symbol" aria-hidden="true"><i /><i /><i /><i /></span><span>limketmon<span className="brand-period">.</span></span>{children}</>;
 }
 
-type CardArtworkProps = { card: Card; quantity?: number; enhanceLevel?: number; priority?: boolean };
+type CardArtworkProps = { card: Card; quantity?: number; materialCount?: number; enhanceLevel?: number; priority?: boolean };
+
+export type MaterialSource = { materialCount?: number; quantity?: number; baseCardId?: string; cardId?: string };
+
+/** Shared enhance materials. Prefer snapshot.materialCount; else sum quantity-1 per same baseCardId. */
+export function materialsOf(row: MaterialSource | undefined, inventory: MaterialSource[] = []): number {
+  if (row && typeof row.materialCount === 'number' && Number.isFinite(row.materialCount)) return Math.max(0, Math.floor(row.materialCount));
+  const base = row?.baseCardId || row?.cardId;
+  if (base && inventory.length) {
+    return inventory.reduce((sum, item) => ((item.baseCardId || item.cardId) === base ? sum + enhanceMaterials(item.quantity ?? 0) : sum), 0);
+  }
+  return enhanceMaterials(row?.quantity ?? 0);
+}
+
+/**
+ * Position shown next to a card. lib/battle owns the rule (회복→힐러, 보호→탱커, 상태이상→지원, 공격→딜러);
+ * when its label table is not published yet, the same four Korean words are used so the screen stays
+ * readable. Display only: battle numbers always come from the battle module.
+ */
+const POSITION_TEXT: Record<string, string> = { healer: '힐러', tank: '탱커', dealer: '딜러', support: '지원' };
+const SHARED_POSITION_LABEL = (battleTypes as unknown as { POSITION_LABEL?: Record<string, string> }).POSITION_LABEL;
+
+function opsPosition(ops: readonly AbilityOp[]): string {
+  const kinds = new Set<string>();
+  const walk = (list: readonly AbilityOp[]) => { for (const op of list) { if (op.op === 'conditional') walk(op.then); else kinds.add(op.op); } };
+  walk(ops);
+  if (kinds.has('heal')) return 'healer';
+  if (kinds.has('shield')) return 'tank';
+  if (kinds.has('apply_status') || kinds.has('modify_stat')) return 'support';
+  return 'dealer';
+}
+
+/** Position + element of one card, derived once from the same lib the battle engine uses. */
+export function cardIdentity(card: Card): { position: string; positionLabel: string; element: Element } {
+  const stats = battleStats(card) as CardBattleStats & { position?: string };
+  const position = stats.position ?? opsPosition(stats.ability.ops);
+  return { position, positionLabel: SHARED_POSITION_LABEL?.[position] ?? POSITION_TEXT[position] ?? POSITION_TEXT.dealer!, element: stats.element };
+}
+
+/** A card is transcended when it already climbed a rarity or one of its traits did. */
+export function isTranscended(rarity: Rarity, traits: readonly Trait[] = []): boolean {
+  return rarity === 'XR' || traits.some((trait) => trait.transcended);
+}
+
+/** 유효등급 · 초월 · 포지션 · 속성 · +n: the five marks every owned card carries on screen. */
+export function CardBadges({ card, progress, className = '' }: { card: Card; progress?: CardProgress; className?: string }) {
+  const identity = cardIdentity(card);
+  return (
+    <div className={`card-badges${className ? ` ${className}` : ''}`}>
+      <span className="card-badge">{identity.positionLabel}</span>
+      <span className="card-badge">{ELEMENT_LABEL[identity.element]}</span>
+      <span className={`card-badge rarity-${card.rarity}`}>{card.rarity}</span>
+      {progress && progress.enhanceLevel > 0 && <span className="card-badge is-enhance">+{progress.enhanceLevel}</span>}
+      {isTranscended(card.rarity, progress?.traits) && <span className="card-badge is-transcend"><Icon name="sparkle" />초월</span>}
+    </div>
+  );
+}
 
 /**
  * Grid/list preview: plain DOM, no springs, pointer tracking or foil layers. The archive renders
  * one per card, so a per-card spring + two motion layers was the biggest idle cost on the page.
  */
-export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantity = 0, enhanceLevel = 0, priority = false }: CardArtworkProps) {
+export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantity = 0, materialCount, enhanceLevel = 0, priority = false }: CardArtworkProps) {
   const thumbKey = card.imageKey ? `${card.imageKey.replace(/\.[^.]+$/, "")}.webp` : "";
-  const materials = enhanceMaterials(quantity);
+  const materials = materialCount ?? enhanceMaterials(quantity);
   return (
     <div className={`card-art rarity-${card.rarity}`}>
       <img src={`/cards/thumbs/${thumbKey}`} alt={cardTitle(card)} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : undefined} decoding="async" draggable={false} />
@@ -61,9 +120,9 @@ export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantit
 });
 
 /** Tilt + foil: only the one or two cards the player is actively looking at (detail, pull reveal). */
-function InteractiveCardArtwork({ card, quantity = 0, enhanceLevel = 0, priority = false }: CardArtworkProps) {
+function InteractiveCardArtwork({ card, quantity = 0, materialCount, enhanceLevel = 0, priority = false }: CardArtworkProps) {
   const reduced = useReducedMotion();
-  const materials = enhanceMaterials(quantity);
+  const materials = materialCount ?? enhanceMaterials(quantity);
   const rx = useSpring(0, gentleSpring);
   const ry = useSpring(0, gentleSpring);
   const light = useSpring(0, { stiffness: 350, damping: 35 });
@@ -109,8 +168,9 @@ export function CardArtwork({ interactive = false, ...props }: CardArtworkProps 
   return interactive ? <InteractiveCardArtwork {...props} /> : <StaticCardArtwork {...props} />;
 }
 
-export function CardButton({ card, quantity = 0, enhanceLevel = 0, onClick, priority = false }: { card: Card; quantity?: number; enhanceLevel?: number; onClick: () => void; priority?: boolean }) {
-  return <button type="button" className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 카드 1장 · 강화 재료 ${enhanceMaterials(quantity)}장` : '카드 미리보기'}`}><StaticCardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority={priority} /></button>;
+export function CardButton({ card, quantity = 0, materialCount, enhanceLevel = 0, onClick, priority = false }: { card: Card; quantity?: number; materialCount?: number; enhanceLevel?: number; onClick: () => void; priority?: boolean }) {
+  const materials = materialCount ?? enhanceMaterials(quantity);
+  return <button type="button" className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장 · 강화 재료 ${materials}장` : '카드 미리보기'}`}><StaticCardArtwork card={card} quantity={quantity} materialCount={materials} enhanceLevel={enhanceLevel} priority={priority} /></button>;
 }
 
 export function CardBack({ count = 1 }: { count?: number }) {
@@ -124,7 +184,7 @@ function BattleCardPanel({ card, enhanceLevel = 0 }: { card: Card; enhanceLevel?
   const stats = applyEnhance(base, enhanceLevel, card.rarity);
   const next = enhanceLevel < MAX_ENHANCE ? applyEnhance(base, enhanceLevel + 1, card.rarity) : null;
   // The combatant's real signature: the raw catalog numbers scaled to the card's own stats.
-  const signature = scaleAbility(stats.ability, card.rarity, enhanceLevel);
+  const signature = scaleAbility(stats.ability, card.rarity, enhanceLevel, catalogCard(card).rarity);
   const rows: Array<[string, string, number]> = [
     ['체력', String(stats.maxHp), stats.maxHp - base.maxHp],
     ['공격', String(stats.atk), stats.atk - base.atk],
@@ -222,7 +282,7 @@ export function describeOps(ops: readonly AbilityOp[]): string {
     .join(' · ');
 }
 
-export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnhance, enhancing, onClose }: { card: Card; quantity: number; enhanceLevel?: number; obtainedAt?: string; onEnhance?: (cardId: string) => Promise<void>; enhancing?: boolean; onClose: () => void }) {
+export function CardDetail({ card, quantity, materialCount, enhanceLevel = 0, obtainedAt, progress, growth, onEnhance, enhancing, onClose }: { card: Card; quantity: number; materialCount?: number; enhanceLevel?: number; obtainedAt?: string; progress?: CardProgress; growth?: ReactNode; onEnhance?: (cardId: string) => Promise<void>; enhancing?: boolean; onClose: () => void }) {
   const reduced = useReducedMotion();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -230,7 +290,7 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
   const y = useMotionValue(0);
   const dragged = useRef(false);
   const [note, setNote] = useState<string | null>(null);
-  const materials = enhanceMaterials(quantity);
+  const materials = materialCount ?? enhanceMaterials(quantity);
   const cost = enhanceCost(enhanceLevel);
   const deficit = cost - materials;
 
@@ -254,9 +314,10 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
         <button className="sheet-handle" aria-label="아래로 끌어 닫기, 또는 눌러 닫기" onPointerDown={(event) => { dragged.current = false; drag.start(event); }} onClick={(event) => { if (!dragged.current || event.detail === 0) onClose(); }}><span /></button>
         <div className="detail-scroll">
         
-        <div className="detail-art"><CardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority interactive /><p><Icon name="hand" />카드에 손을 대고 빛을 움직여 보세요</p></div>
-        <div className="detail-copy"><div className="detail-meta"><span className={`rarity-tag rarity-${card.rarity}`}>{card.rarity}</span><span>NO. {String(card.version).padStart(3, '0')} / ORIGINALS</span></div>
+        <div className="detail-art"><CardArtwork card={card} quantity={quantity} materialCount={materials} enhanceLevel={enhanceLevel} priority interactive /><p><Icon name="hand" />카드에 손을 대고 빛을 움직여 보세요</p></div>
+          <div className="detail-copy"><div className="detail-meta"><span className={`rarity-tag rarity-${card.rarity}`}>{card.rarity}</span>{isTranscended(card.rarity, progress?.traits) && <span className="transcend-tag"><Icon name="sparkle" />초월</span>}<span>NO. {String(card.version).padStart(3, '0')} / ORIGINALS</span></div>
           <h2 id={titleId}>{cardTitle(card)}</h2><p className="detail-name">{card.name}</p>
+          <CardBadges card={card} progress={progress} className="detail-badges" />
           <div className="skill-block"><span className="eyebrow">SPECIAL ABILITY</span><h3>{card.skillName}</h3><p>{card.skillDescription}</p></div>
           <blockquote>“{card.flavorText}”</blockquote>
           <dl className="card-stats">{[['공격', card.attack], ['방어', card.defense], ['행운', card.luck]].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}<span>/ 100</span></dd><div className="stat-track" aria-hidden="true"><motion.i initial={{ scaleX: reduced ? Number(value) / 100 : 0 }} animate={{ scaleX: Number(value) / 100 }} transition={{ ...spring, delay: reduced ? 0 : 0.15 }} /></div></div>)}</dl>
@@ -270,7 +331,7 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
                 <button
                   type="button"
                   className="btn btn-dark"
-                  disabled={enhancing || !canEnhance(quantity, enhanceLevel)}
+                  disabled={enhancing || enhanceLevel >= MAX_ENHANCE || materials < cost}
                   onClick={async () => {
                     setNote(null);
                     try {
@@ -281,13 +342,14 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
                     }
                   }}
                 >
-                  {enhanceLevel >= MAX_ENHANCE ? '최대 강화' : canEnhance(quantity, enhanceLevel) ? '강화 +' + (enhanceLevel + 1) + ' · 재료 ' + cost + '장 소모' : '강화 재료 ' + materials + '장 / ' + cost + '장 필요 · ' + deficit + '장 부족'}
+                  {enhanceLevel >= MAX_ENHANCE ? '최대 강화' : materials >= cost ? '강화 +' + (enhanceLevel + 1) + ' · 재료 ' + cost + '장 소모' : '강화 재료 ' + materials + '장 / ' + cost + '장 필요 · ' + deficit + '장 부족'}
                 </button>
               ) : null}
               {note && <p className="enhance-note">{note}</p>}
             </div>
           )}
-          <div className="detail-ownership"><span>{quantity ? <><Icon name="check" />내 컬렉션 · 보유 카드 1장 · 강화 재료 {materials}장</> : '아직 발견하지 못한 카드'}</span>{obtainedAt && <small>{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium' }).format(new Date(obtainedAt))} 첫 수집</small>}</div>
+          {growth}
+          <div className="detail-ownership"><span>{quantity ? <><Icon name="check" />내 컬렉션 · 보유 {quantity}장 · 강화 재료 {materials}장</> : '아직 발견하지 못한 카드'}</span>{obtainedAt && <small>{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium' }).format(new Date(obtainedAt))} 첫 수집</small>}</div>
         </div>
         </div>
       </motion.section>

@@ -174,18 +174,18 @@ test('higher defense strictly reduces damage', () => {
 test('element ring: advantage > neutral > disadvantage', () => {
   const hit = (defenderElement: Element, modifier: BattleSetup['modifier'] = { kind: 'none' }): number => {
     const state = createBattle(
-      setup({ seed: 13, modifier, player: [unit({ element: 'light', atk: 50 })], opponent: [unit({ element: defenderElement, def: 10 })] })
+      setup({ seed: 13, modifier, player: [unit({ element: 'water', atk: 50 })], opponent: [unit({ element: defenderElement, def: 10 })] })
     );
     return damageEvents(advance(state, attack('a0')).events)[0].amount;
   };
-  // ring: light beats shadow, is beaten by spark, and is neutral against iron/nature.
-  assert.ok(hit('shadow') > hit('iron'), 'strong must beat neutral');
-  assert.ok(hit('iron') > hit('spark'), 'neutral must beat weak');
+  // ring: water beats fire, is beaten by dark, and is neutral against grass/earth.
+  assert.ok(hit('fire') > hit('grass'), 'strong must beat neutral');
+  assert.ok(hit('grass') > hit('dark'), 'neutral must beat weak');
 
-  const boosted = hit('shadow', { kind: 'element_boost', element: 'light', bonus: 0.5 });
-  assert.ok(boosted > hit('shadow'), 'element_boost on a matching attacker must raise damage');
-  const unboosted = hit('shadow', { kind: 'element_boost', element: 'iron', bonus: 0.5 });
-  assert.equal(unboosted, hit('shadow'), 'element_boost on a non-matching attacker changes nothing');
+  const boosted = hit('fire', { kind: 'element_boost', element: 'water', bonus: 0.5 });
+  assert.ok(boosted > hit('fire'), 'element_boost on a matching attacker must raise damage');
+  const unboosted = hit('fire', { kind: 'element_boost', element: 'grass', bonus: 0.5 });
+  assert.equal(unboosted, hit('fire'), 'element_boost on a non-matching attacker changes nothing');
 });
 
 // ---------------------------------------------------------------------------

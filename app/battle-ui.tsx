@@ -1,6 +1,6 @@
 'use client';
 
-import { motion, useReducedMotion } from 'motion/react';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Card } from '../lib/cards';
 import type { Ability, AiProfile, BattleEvent, BattleKind, BattleMode, BattleModifier, BattleSetup, BattleState, Combatant, Decision } from '../lib/battle/types';
@@ -9,7 +9,8 @@ import type { BattleResultSummary, BattleSetupResponse, DailyChallengeSummary, D
 import { BATTLE_MODES, MODE_CREDITS_MULTIPLIER, MODE_LABELS, OPPONENTS, opponentById } from '../lib/battle/opponents';
 import { runBattle, stepBattle } from '../lib/battle/simulate';
 import { aiDecision, deciderFor } from '../lib/battle/ai';
-import { CardArtwork, Icon, describeOps, spring } from './card-ui';
+import { CardArtwork, CardBadges, Icon, cardIdentity, describeOps, isTranscended, spring } from './card-ui';
+import type { InventoryRow } from './progression-ui';
 import './battle.css';
 
 type User = { email: string; displayName: string } | null;
@@ -23,7 +24,8 @@ type BattleViewProps = {
   unlockedModes: BattleMode[];
   /** Opponent ids already cleared, per mode; drives the completion ticks and progress. */
   clearedByMode: Record<BattleMode, string[]>;
-  inventory?: Array<{ cardId: string; enhanceLevel?: number }>;
+  /** Owned rows: effective card + growth state, so tiles can show +n / 포지션 / 초월. */
+  inventory?: InventoryRow[];
   onStateChange: () => void;
   onNavigate: (tab: string) => void;
   onOpenCard: (card: Card) => void;
@@ -101,6 +103,11 @@ function describe(event: BattleEvent, name: (uid: string) => string): { text: st
       if (event.absorbed > 0) sub.push(`보호막 ${event.absorbed} 흡수`);
       if (event.element === 'strong') sub.push('속성 유리');
       if (event.element === 'weak') sub.push('속성 불리');
+      if (event.synergy) {
+        const extra = Math.max(0, event.amount - Math.round(event.amount / event.synergy.multiplier));
+        sub.push(`연계 ${event.synergy.name}`);
+        if (extra > 0) sub.push(`추가 ${extra}`);
+      }
       return { text: `${name(event.uid)} → ${name(event.target)} ${event.amount} 피해${sub.length ? ` · ${sub.join(' · ')}` : ''}`, tone: event.crit ? 'crit' : 'damage' };
     }
     case 'heal': return { text: `${name(event.uid)} → ${name(event.target)} ${event.amount} 회복`, tone: 'heal' };
@@ -123,6 +130,11 @@ function effectFor(event: BattleEvent): { uid: string; text: string; sub: string
       if (event.absorbed > 0) sub.push(`보호막 ${event.absorbed} 흡수`);
       if (event.element === 'strong') sub.push('효과가 컸다');
       if (event.element === 'weak') sub.push('효과가 약했다');
+      if (event.synergy) {
+        const extra = Math.max(0, event.amount - Math.round(event.amount / event.synergy.multiplier));
+        sub.push(`연계 ${event.synergy.name}`);
+        if (extra > 0) sub.push(`추가 ${extra}`);
+      }
       if (event.source === 'poison') sub.push('중독');
       return { uid: event.target, text: `-${event.amount}`, sub: sub.length ? sub.join(' · ') : null, tone: event.crit ? 'crit' : 'damage' };
     }
@@ -152,15 +164,16 @@ export function opponentDecision(state: BattleState, profile: AiProfile): Decisi
   return aiDecision(state, profile);
 }
 
-const UnitTile = memo(function UnitTile({ c, card, fx, active, reduced, enhanceLevel = 0 }: {
+const UnitTile = memo(function UnitTile({ c, card, fx, active, reduced, progress }: {
   c: Combatant;
   sig: string;
   card: Card | undefined;
   fx: Fx | null;
   active: boolean;
   reduced: boolean;
-  enhanceLevel?: number;
+  progress?: InventoryRow;
 }) {
+  const enhanceLevel = progress?.enhanceLevel ?? 0;
   const ratio = c.maxHp > 0 ? Math.max(0, c.hp) / c.maxHp : 0;
   const health = c.hp <= 0 ? 'down' : ratio <= 0.3 ? 'low' : ratio <= 0.6 ? 'mid' : 'high';
   const frames = reduced
@@ -170,6 +183,9 @@ const UnitTile = memo(function UnitTile({ c, card, fx, active, reduced, enhanceL
     <article className={`unit-tile rarity-${c.rarity} ${active ? 'is-active' : ''} ${c.hp <= 0 ? 'is-down' : ''}`}>
       <div className="unit-head">
         <span className="unit-element">{ELEMENT_LABEL[c.element]}</span>
+        {card && <span className="unit-position">{cardIdentity(card).positionLabel}</span>}
+        {enhanceLevel > 0 && <span className="unit-enhance">+{enhanceLevel}</span>}
+        {isTranscended(c.rarity, progress?.traits) && <span className="unit-transcend"><Icon name="sparkle" />초월</span>}
         {active && <span className="unit-turn">차례</span>}
       </div>
       <div className="unit-art">
@@ -201,12 +217,12 @@ const UnitTile = memo(function UnitTile({ c, card, fx, active, reduced, enhanceL
       {fx && <span key={`flash-${fx.key}`} className={`fx-flash fx-${fx.tone}`} aria-hidden="true" />}
     </article>
   );
-}, (before, after) => before.sig === after.sig && before.card === after.card && before.active === after.active && before.fx?.key === after.fx?.key && before.reduced === after.reduced && before.enhanceLevel === after.enhanceLevel);
+}, (before, after) => before.sig === after.sig && before.card === after.card && before.active === after.active && before.fx?.key === after.fx?.key && before.reduced === after.reduced && before.progress === after.progress);
 
 export function BattleView({ user, decks, cards, daily, unlockedModes, clearedByMode, inventory, onStateChange, onNavigate, onOpenCard, onError }: BattleViewProps) {
   const reduced = !!useReducedMotion();
   const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
-  const enhanceMap = useMemo(() => new Map(inventory?.map((item) => [item.cardId, item.enhanceLevel ?? 0]) ?? []), [inventory]);
+  const rows = useMemo(() => new Map(inventory?.map((item) => [item.cardId, item]) ?? []), [inventory]);
   const [phase, setPhase] = useState<'select' | 'battle'>('select');
   const [deckId, setDeckId] = useState('');
   const [mode, setMode] = useState<BattleMode>('normal');
@@ -221,6 +237,8 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
   const [summary, setSummary] = useState<BattleResultSummary | null>(null);
   const [settling, setSettling] = useState(false);
   const [settleFailed, setSettleFailed] = useState(false);
+  /** The settlement dialog owns the result; closing it leaves a re-open handle in the arena. */
+  const [resultOpen, setResultOpen] = useState(false);
   /** Component-local only: no storage, no server round-trip, no effect on the verified battle. */
   const [pace, setPace] = useState<BattlePace>('x2');
   /** Reduced-motion users always get the instant drain, whatever the select says. */
@@ -295,6 +313,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
         onError('전투 기록이 맞지 않아 보상을 지급하지 못했어요. 새 전투로 다시 도전해주세요.');
         return;
       }
+      setSettleFailed(false);
       setSummary(result);
       onStateChange();
     } catch (error) {
@@ -309,6 +328,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
   useEffect(() => {
     if (phase !== 'battle' || !state || state.status === 'active' || settled.current) return;
     settled.current = true;
+    setResultOpen(true);
     void settle();
   }, [phase, state, settle]);
 
@@ -351,6 +371,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
       setQueue(opening.events);
       setSummary(null);
       setSettleFailed(false);
+      setResultOpen(false);
       setPhase('battle');
     } catch (error) {
       if (run !== startRun.current) return;
@@ -399,6 +420,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
     setFx([]);
     setSummary(null);
     setSettleFailed(false);
+    setResultOpen(false);
     setNotice(null);
   }
 
@@ -474,11 +496,13 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
             </div>
             <ul className="deck-preview">
               {chosenCards.map((card) => {
-                const level = enhanceMap.get(card.id) ?? 0;
+                const row = rows.get(card.id);
+                const level = row?.enhanceLevel ?? 0;
                 return (
                   <li key={card.id}>
                     <CardArtwork card={card} enhanceLevel={level} />
                     <span>{card.name}{level > 0 ? ` +${level}` : ''}</span>
+                    <CardBadges card={card} progress={row} />
                   </li>
                 );
               })}
@@ -533,7 +557,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
                       <span className="difficulty">{DIFFICULTY_LABEL[opponent.difficulty] ?? opponent.difficulty}</span>
                     </header>
                     <p className="opponent-blurb">{opponent.blurb}</p>
-                    <p className="opponent-reward"><Icon name="ticket" />{cleared ? '첫 보상 수령 완료 · 확정권 드롭 도전' : `${opponent.reward.label} ${opponent.reward.credits}장`}</p>
+                    <p className="opponent-reward"><Icon name="ticket" />{cleared ? '첫 보상 수령 완료 · 승리 시 확정 지급' : `${opponent.reward.label} ${opponent.reward.credits}장 · 승리 시 확정 지급`}</p>
                     <button className="btn btn-dark" disabled={!chosenLegal || starting} onClick={() => void start(opponent.id, 'pve', mode)}>
                       이 덱으로 전투<Icon name="arrow" />
                     </button>
@@ -557,6 +581,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
     serverResult === 'won' || serverResult === 'lost' || serverResult === 'draw' || serverResult === 'invalid'
       ? serverResult
       : state.status;
+  const resultHeadline = outcome === 'won' ? '승리했습니다.' : outcome === 'lost' ? '패배했습니다.' : outcome === 'invalid' ? '기록을 확인할 수 없어요.' : '무승부입니다.';
   const canAct = myTurn && !animating;
   const ability = active?.ability ?? null;
   /** Unlocked enhancement skills, in +5 / +10 / +15 order. Empty for opponents and low enhance. */
@@ -626,7 +651,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
           </div>
           <div className="battle-row ally" role="group" aria-label="내 팀">
             {state.sides.a.map((combatant) => (
-              <UnitTile key={combatant.uid} c={combatant} sig={signature(combatant)} card={byId.get(combatant.cardId)} fx={fxFor(combatant.uid)} active={activeUid === combatant.uid} reduced={reduced} enhanceLevel={enhanceMap.get(combatant.cardId) ?? 0} />
+              <UnitTile key={combatant.uid} c={combatant} sig={signature(combatant)} card={byId.get(combatant.cardId)} fx={fxFor(combatant.uid)} active={activeUid === combatant.uid} reduced={reduced} progress={rows.get(combatant.cardId)} />
             ))}
           </div>
           {state.status !== 'active' && (
@@ -686,49 +711,162 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
         ) : (
           <div className="battle-actions result-panel">
             <div className="result-copy">
-              <h2>{outcome === 'won' ? '승리했습니다.' : outcome === 'lost' ? '패배했습니다.' : outcome === 'invalid' ? '기록을 확인할 수 없어요.' : '무승부입니다.'}</h2>
+              <h2>{resultHeadline}</h2>
               <p>{state.round}라운드{state.endReason === 'turn_limit' ? ' · 라운드 제한' : state.endReason === 'timeout' ? ' · 시간 초과' : ''}</p>
             </div>
             {settling && <p className="result-pending" role="status"><span className="loading-dot" />전투 기록을 정산하는 중이에요.</p>}
             {settleFailed && !settling && (
-              <div className="result-pending" role="status">
+              <div className="result-pending" role="alert">
                 <p>보상 정산을 마치지 못했어요.</p>
                 <button className="btn btn-dark" onClick={() => void settle()}>다시 확인하기</button>
               </div>
             )}
             {summary && (
               <div className="result-summary">
-                {!!summary.rewards.length && (
-                  <ul className="reward-list">
-                    {summary.rewards.map((reward) => <li key={reward.label}><Icon name="ticket" /><span>{reward.label}</span><strong>{reward.ticketType ? `+${reward.quantity ?? 0}장` : `+${reward.credits}`}</strong></li>)}
-                  </ul>
-                )}
-                {!!summary.unlocked.length && (
-                  <div className="result-unlocked">
-                    <h3>새로 얻은 업적</h3>
-                    <ul>
-                      {summary.unlocked.map((id) => (
-                        <li key={id}><span className="text-button">{ACHIEVEMENT_LABEL[id] ?? id}</span></li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                <dl className="result-stats">
-                  {summary.mvpCardId && byId.get(summary.mvpCardId) && <div><dt>최고 활약</dt><dd>{byId.get(summary.mvpCardId)?.name}</dd></div>}
-                  <div><dt>라운드</dt><dd>{summary.rounds}</dd></div>
-                  <div><dt>가한 피해</dt><dd>{summary.damageDealt}</dd></div>
-                </dl>
+                <SummaryBody summary={summary} byId={byId} />
               </div>
             )}
             <div className="result-actions">
-              <button className="btn btn-primary" onClick={reset} disabled={settling}>다시 전투<Icon name="arrow" /></button>
+              <button className="btn btn-primary" onClick={() => setResultOpen(true)}>정산 결과 열기<Icon name="arrow" /></button>
               <button className="text-button" onClick={() => onNavigate('deck')}>덱 정리</button>
-              <button className="text-button" onClick={() => onNavigate('pull')}>카드 더 모으기</button>
             </div>
           </div>
         )}
+
+        <AnimatePresence>
+          {state.status !== 'active' && resultOpen && (
+            <ResultDialog
+              key="battle-result"
+              outcome={outcome}
+              round={state.round}
+              endReason={state.endReason}
+              summary={summary}
+              settling={settling}
+              settleFailed={settleFailed}
+              byId={byId}
+              onRetry={() => void settle()}
+              onExit={() => { setResultOpen(false); reset(); }}
+              onRematch={() => { setResultOpen(false); if (setup) void start(setup.opponentId, state.kind, setup.mode ?? 'normal'); }}
+              onNavigate={onNavigate}
+              onClose={() => setResultOpen(false)}
+            />
+          )}
+        </AnimatePresence>
       </div>
     </section>
+  );
+}
+
+/** Reward receipt, achievements and battle numbers: one body for the arena panel and the result sheet. */
+function SummaryBody({ summary, byId }: { summary: BattleResultSummary; byId: Map<string, Card> }) {
+  return (
+    <>
+      {summary.rewards.length ? (
+        <ul className="reward-list">
+          {summary.rewards.map((reward) => (
+            <li key={reward.label}><Icon name="ticket" /><span>{reward.label}</span><strong>{reward.ticketType ? `+${reward.quantity ?? 0}장` : `+${reward.credits}장`}</strong></li>
+          ))}
+        </ul>
+      ) : <p className="deck-note">이번 전투에서 지급된 보상은 없어요.</p>}
+      {summary.unlocked.length ? (
+        <div className="result-unlocked">
+          <h3>새로 얻은 업적</h3>
+          <ul>{summary.unlocked.map((id) => <li key={id}><span className="text-button">{ACHIEVEMENT_LABEL[id] ?? id}</span></li>)}</ul>
+        </div>
+      ) : null}
+      <dl className="result-stats">
+        {summary.mvpCardId && byId.get(summary.mvpCardId) && <div><dt>최고 활약</dt><dd>{byId.get(summary.mvpCardId)?.name}</dd></div>}
+        <div><dt>라운드</dt><dd>{summary.rounds}</dd></div>
+        <div><dt>가한 피해</dt><dd>{summary.damageDealt}</dd></div>
+      </dl>
+    </>
+  );
+}
+
+/**
+ * Settlement result sheet. Native dialog: Escape and the backdrop dismiss it without leaving the
+ * battle, and the arena keeps a re-open handle. A failed settle keeps its retry in here.
+ */
+function ResultDialog({ outcome, round, endReason, summary, settling, settleFailed, byId, onRetry, onExit, onRematch, onNavigate, onClose }: {
+  outcome: string;
+  round: number;
+  endReason?: 'hp' | 'turn_limit' | 'timeout';
+  summary: BattleResultSummary | null;
+  settling: boolean;
+  settleFailed: boolean;
+  byId: Map<string, Card>;
+  onRetry: () => void;
+  onExit: () => void;
+  onRematch: () => void;
+  onNavigate: (tab: string) => void;
+  onClose: () => void;
+}) {
+  const reduced = useReducedMotion();
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
+    const element = dialog.current;
+    element?.showModal();
+    document.body.style.overflow = 'hidden';
+    return () => {
+      element?.close();
+      document.body.style.overflow = overflow;
+      previous?.focus({ preventScroll: true });
+    };
+  }, []);
+
+  const headline = outcome === 'won' ? '승리했습니다.' : outcome === 'lost' ? '패배했습니다.' : outcome === 'invalid' ? '기록을 확인할 수 없어요.' : '무승부입니다.';
+  return (
+    <motion.dialog
+      ref={dialog}
+      className="detail-dialog"
+      aria-labelledby="battle-result-title"
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
+    >
+      <motion.section
+        className="detail-sheet result-sheet"
+        data-result={outcome}
+        initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+        transition={spring}
+      >
+        <div className="result-sheet-body">
+          <header className="result-hero">
+            <button type="button" className="icon-button result-close" autoFocus onClick={onClose} aria-label="결과 창 닫기"><Icon name="close" /></button>
+            <p className="eyebrow">BATTLE RESULT</p>
+            <h2 id="battle-result-title">{headline}</h2>
+            <p>{round}라운드{endReason === 'turn_limit' ? ' · 라운드 제한' : endReason === 'timeout' ? ' · 시간 초과' : ''}</p>
+          </header>
+          {settling && <p className="result-pending" role="status"><span className="loading-dot" />전투 기록을 정산하는 중이에요.</p>}
+          {settleFailed && !settling && (
+            <div className="result-pending" role="alert">
+              <p>보상 정산을 마치지 못했어요. 연결을 확인한 뒤 다시 시도해주세요.</p>
+              <button className="btn btn-dark" onClick={onRetry}>다시 확인하기</button>
+            </div>
+          )}
+          {summary && (
+            <div className="result-summary">
+              <h3 className="result-receipt"><Icon name="ticket" />지급 내역</h3>
+              <SummaryBody summary={summary} byId={byId} />
+            </div>
+          )}
+          <div className="result-actions">
+            <button className="btn btn-primary" onClick={onExit}>나가기<Icon name="arrow" /></button>
+            <button className="btn btn-dark" disabled={settling} onClick={onRematch}>다시 전투</button>
+            <button className="text-button" onClick={() => onNavigate('deck')}>덱 정리</button>
+            <button className="text-button" onClick={() => onNavigate('pull')}>카드 더 모으기</button>
+          </div>
+        </div>
+      </motion.section>
+    </motion.dialog>
   );
 }
 

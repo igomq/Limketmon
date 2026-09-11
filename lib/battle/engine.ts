@@ -15,7 +15,10 @@
 //   variance    = 0.9 + draw1 * 0.2
 //   element     = ring x1.25 (beats) / x0.8 (beaten by) / x1.0
 //   crit        = draw2 * 100 < attacker.crit ? x1.6 : x1.0
-//   final       = max(1, round(base * variance * element * crit))
+//   traits      = (1 + damage) * (1.30 + synergy, when the target's mark links) * (1 - resist)
+//   final       = max(1, round(base * variance * element * crit * traits))
+// The target's mark is the last element that damaged it and the round it landed; a follow-up of
+// the linked element within 2 rounds deals the link bonus once and then consumes the mark.
 // Shield absorbs first; the damage event reports the pre-shield amount plus the
 // absorbed slice. Poison ticks and regen are flat and bypass the shield.
 
@@ -35,7 +38,18 @@ import type {
   Side,
   StatusId
 } from './types.ts';
-import { BATTLE_RULESET_VERSION, ELEMENT_RING, STATUS_IDS } from './types.ts';
+import {
+  BATTLE_RULESET_VERSION,
+  ELEMENT_RING,
+  RESIST_MAX,
+  STATUS_IDS,
+  SYNERGY_BASE,
+  SYNERGY_WINDOW_ROUNDS,
+  elementLinkOf,
+  positionOf,
+  resistTraitId,
+  traitEffect
+} from './types.ts';
 import { nextRandom, seedFrom } from './rng.ts';
 
 /** Hard ceiling on rounds; round > MAX_ROUNDS ends the battle as a timeout draw. */
@@ -120,6 +134,9 @@ function makeCombatant(side: Side, slot: number, seed: CombatantSeed): Combatant
     ability: { ...seed.ability },
     // Only the unlocked additions; the base ability is never duplicated into this list.
     skills: (seed.skills ?? []).map((skill) => ({ ...skill })),
+    position: seed.position ?? positionOf(seed.ability),
+    traits: (seed.traits ?? []).map((trait) => ({ ...trait })),
+    mark: null,
     statuses: []
   };
 }
@@ -197,17 +214,18 @@ export function advance(state: BattleState, decision: Decision): AdvanceResult {
   }
 
   events.push({ t: 'turn', uid: actor.uid, round: next.round });
+  const spent = new Set<string>();
   if (action === 'attack' || !ability) {
     events.push({ t: 'action', uid: actor.uid, action: 'attack' });
     const targets = resolveTargets(next, actor, 'enemy_active');
     for (const target of targets) {
-      applyHit(next, actor, target, rollDamage(next, actor, target, effectiveStat(actor, 'atk')), 'attack', events);
+      applyHit(next, actor, target, rollDamage(next, actor, target, effectiveStat(actor, 'atk')), 'attack', events, spent);
     }
   } else {
     events.push({ t: 'action', uid: actor.uid, action: 'skill', abilityName: ability.name });
     actor.energy -= ability.cost;
     actor.cooldown = ability.cooldown > 0 ? ability.cooldown + 1 : 0;
-    runOps(next, actor, ability.ops, events, 0);
+    runOps(next, actor, ability.ops, events, 0, spent);
   }
   return finishAfterTurn(next, actor, events);
 }
@@ -357,6 +375,8 @@ interface Hit {
   amount: number;
   crit: boolean;
   element: 'strong' | 'weak' | 'neutral';
+  /** Set when this hit cashed in an element link on the target. */
+  synergy?: { name: string; multiplier: number };
 }
 
 /** Fixed draw order per hit: variance, then crit. */
@@ -367,11 +387,32 @@ function rollDamage(state: BattleState, attacker: Combatant, defender: Combatant
   const element = elementRelation(attacker.element, defender.element);
   const elementMult = element === 'strong' ? RING_STRONG : element === 'weak' ? RING_WEAK : 1;
   const crit = nextRandom(state) * 100 < attacker.crit;
+  // Traits and links multiply the hit; neither draws, so the recorded seed still replays exactly.
+  // 'damage' grows the card's own element attacks, which for this engine is every hit it deals.
+  const synergy = openLink(state, attacker, defender);
+  const offense = (1 + traitEffect(attacker.traits, 'damage')) * (synergy?.multiplier ?? 1);
+  const resist = Math.min(RESIST_MAX, traitEffect(defender.traits, resistTraitId(attacker.element)));
   return {
-    amount: Math.max(1, Math.round(base * variance * elementMult * (crit ? CRIT_MULT : 1))),
+    amount: Math.max(1, Math.round(base * variance * elementMult * (crit ? CRIT_MULT : 1) * offense * (1 - resist))),
     crit,
-    element
+    element,
+    synergy
   };
+}
+
+/**
+ * The link the incoming hit cashes in: the target must carry a mark from another element, at most
+ * SYNERGY_WINDOW_ROUNDS old, whose follow-up this element is. A synergy trait on the attacker
+ * grows the 1.30 base multiplier.
+ */
+function openLink(state: BattleState, attacker: Combatant, defender: Combatant): Hit['synergy'] {
+  const mark = defender.mark;
+  if (!mark || mark.element === attacker.element) return undefined;
+  const age = state.round - mark.round;
+  if (age < 0 || age > SYNERGY_WINDOW_ROUNDS) return undefined;
+  const link = elementLinkOf(mark.element, attacker.element);
+  if (!link) return undefined;
+  return { name: link.name, multiplier: SYNERGY_BASE + traitEffect(attacker.traits, 'synergy') };
 }
 
 function boostMultiplier(state: BattleState, element: Element): number {
@@ -388,7 +429,7 @@ function elementRelation(attacker: Element, defender: Element): 'strong' | 'weak
 }
 
 /** Shield absorbs first; the event reports the pre-shield amount and the absorbed slice. */
-function applyHit(state: BattleState, source: Combatant, target: Combatant, hit: Hit, kind: 'attack' | 'skill', events: BattleEvent[]): void {
+function applyHit(state: BattleState, source: Combatant, target: Combatant, hit: Hit, kind: 'attack' | 'skill', events: BattleEvent[], spent: Set<string>): void {
   let amount = hit.amount;
   let absorbed = 0;
   const shield = findStatus(target, 'shield');
@@ -400,7 +441,27 @@ function applyHit(state: BattleState, source: Combatant, target: Combatant, hit:
   }
   target.hp = Math.max(0, target.hp - amount);
   state.damageBy[source.uid] = (state.damageBy[source.uid] ?? 0) + hit.amount;
-  events.push({ t: 'damage', uid: source.uid, target: target.uid, amount: hit.amount, source: kind, crit: hit.crit, element: hit.element, absorbed });
+  const damage: Extract<BattleEvent, { t: 'damage' }> = {
+    t: 'damage',
+    uid: source.uid,
+    target: target.uid,
+    amount: hit.amount,
+    source: kind,
+    crit: hit.crit,
+    element: hit.element,
+    absorbed
+  };
+  // Only stamped when it fires, so old logs and their comparisons stay byte-identical.
+  if (hit.synergy) damage.synergy = hit.synergy;
+  events.push(damage);
+  // Cashing a link consumes the mark for the rest of this action: later hits cannot re-fire it
+  // and must not write a fresh mark until the next action.
+  if (hit.synergy) {
+    target.mark = null;
+    spent.add(target.uid);
+  } else if (!spent.has(target.uid)) {
+    target.mark = { element: source.element, round: state.round };
+  }
   if (target.hp <= 0) {
     // 'down' is emitted once, at the moment of death; dropping the uid here keeps a corpse
     // from ever being handed a turn (the turn-start check still covers poison deaths).
@@ -413,7 +474,7 @@ function applyHit(state: BattleState, source: Combatant, target: Combatant, hit:
 // Ability ops
 // ---------------------------------------------------------------------------
 
-function runOps(state: BattleState, actor: Combatant, ops: AbilityOp[], events: BattleEvent[], depth: number): void {
+function runOps(state: BattleState, actor: Combatant, ops: AbilityOp[], events: BattleEvent[], depth: number, spent: Set<string>): void {
   if (depth > MAX_OP_DEPTH) return;
   for (const op of ops) {
     switch (op.op) {
@@ -422,7 +483,7 @@ function runOps(state: BattleState, actor: Combatant, ops: AbilityOp[], events: 
         for (const target of resolveTargets(state, actor, op.target ?? 'enemy_active')) {
           for (let hit = 0; hit < hits; hit += 1) {
             if (target.hp <= 0) break;
-            applyHit(state, actor, target, rollDamage(state, actor, target, op.power), 'skill', events);
+            applyHit(state, actor, target, rollDamage(state, actor, target, op.power), 'skill', events, spent);
           }
         }
         break;
@@ -461,7 +522,7 @@ function runOps(state: BattleState, actor: Combatant, ops: AbilityOp[], events: 
       case 'conditional': {
         // The condition reference target is the first living enemy (deterministic).
         const reference = resolveTargets(state, actor, 'enemy_active')[0] ?? null;
-        if (evalWhen(state, actor, reference, op.when)) runOps(state, actor, op.then, events, depth + 1);
+        if (evalWhen(state, actor, reference, op.when)) runOps(state, actor, op.then, events, depth + 1, spent);
         break;
       }
     }

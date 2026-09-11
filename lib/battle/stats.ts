@@ -19,7 +19,17 @@ const BASE_STAT_SCALE = 0.7;
  */
 const BASE_POWER_ANCHOR = 180;
 
-const RARITIES: Rarity[] = ['N', 'R', 'SR', 'SSR', 'UR'];
+/** The six live rarities, weakest first. XR is the only one with no catalog cards of its own. */
+export const RARITIES: Rarity[] = ['N', 'R', 'SR', 'SSR', 'UR', 'XR'];
+
+/**
+ * XR has no catalog cards: it only ever exists as another row's transcended upgrade, so it must
+ * never be averaged into the manifest like a base rarity (that would invent a band out of
+ * nothing). Instead it shares UR's normalization scale, because effectiveCard already multiplies
+ * the promoted row's raw attack/defense/luck by the power-curve ratio (UR x 1.35). Applying the
+ * ratio here as well would square it: a transcended card would reach 1.82x its UR form instead of
+ * the intended 1.35x.
+ */
 
 const RAW_POWER = (card: Card) =>
   40 + Math.round(card.defense * 0.62) +
@@ -35,44 +45,33 @@ const RARITY_SCALE: Record<Rarity, number> = (() => {
     entry.total += RAW_POWER(card);
     entry.count += 1;
   }
-  return Object.fromEntries(
-    RARITIES.map((rarity) => {
-      const entry = sums.get(rarity)!;
-      const mean = entry.count > 0 ? entry.total / entry.count : 1;
-      return [rarity, (BASE_POWER_ANCHOR * enhancePower(rarity, 0)) / mean];
-    })
-  ) as Record<Rarity, number>;
+  const scales = new Map<Rarity, number>();
+  for (const rarity of RARITIES) {
+    const entry = sums.get(rarity)!;
+    if (entry.count === 0) continue;
+    scales.set(rarity, (BASE_POWER_ANCHOR * enhancePower(rarity, 0)) / (entry.total / entry.count));
+  }
+  // XR shares the UR scale; the 1.35 lives in its raw stats (see the note above).
+  scales.set('XR', scales.get('UR')!);
+  return Object.fromEntries(scales) as Record<Rarity, number>;
 })();
 
 /** Energy cost of the signature skill. Cheap skills fire more often, so low rarity stays viable. */
-export const RARITY_COST: Record<Rarity, number> = { N: 2, R: 3, SR: 4, SSR: 5, UR: 6 };
+export const RARITY_COST: Record<Rarity, number> = { N: 2, R: 3, SR: 4, SSR: 5, UR: 6, XR: 7 };
 
 /**
- * Element keyword table, checked in ELEMENTS order (light → shadow → iron → nature → spark),
+ * Element keyword table, checked in ELEMENTS order (earth → water → fire → grass → dark), and the
  * first element with a matching visualTag wins. Anything unmatched falls back to
  * ELEMENTS[card.version % 5] so every card still gets a stable element.
  *
- * light   snow, glare, christmas/holiday props, celebration props, formal wear
- * shadow  dark, obscured, candid/back-of-head, degraded or blurry capture
- * iron    protective gear, uniforms, vehicles, signage, papers
- * nature  water, food, crowds, streets, rain
- * spark   screens, filters, mirrors, animation, low-angle/optical tricks
+ * earth   protective gear, uniforms, vehicles, transit, signage, papers — things that stand still
+ * water   waterparks, wet hair, life jackets, rain, snow, hazy lenses
+ * fire    celebration props, gestures, glare — warmth and energy
+ * grass   food, restaurants, crowds, streets, outdoor scenes
+ * dark    obscured, candid or degraded captures, screens and photo filters
  */
 const ELEMENT_KEYWORDS: Record<Element, string[]> = {
-  light: ['snow', 'glare', 'christmas-tree', 'thumb-up', 'peace-sign', 'bouquet', 'formalwear'],
-  shadow: [
-    'dark-background',
-    'eyes-closed',
-    'back-view',
-    'side-profile',
-    'low-quality',
-    'low-resolution',
-    'mask',
-    'negative-space',
-    'motion-blur',
-    'soft-focus'
-  ],
-  iron: [
+  earth: [
     'glasses',
     'goggles',
     'helmet',
@@ -83,30 +82,50 @@ const ELEMENT_KEYWORDS: Record<Element, string[]> = {
     'vehicle',
     'subway',
     'transit',
-    'sign',
-    'billboard',
     'backpack',
     'papers'
   ],
-  nature: ['waterpark', 'wet-hair', 'waterline', 'food', 'spoon', 'chopsticks', 'restaurant', 'crowd', 'street', 'rain-overlay'],
-  spark: [
-    'distorted-filter',
-    'screenshot',
-    'screenshot-overlay',
-    'animated',
-    'gif',
-    'mirror-selfie',
-    'phone',
-    'phone-foreground',
-    'cat-filter',
-    'filter',
-    'recursive-face',
-    'circular-crop',
-    'collage',
-    'layered-composition',
-    'countdown-overlay',
-    'chat-overlay',
-    'low-angle'
+  water: ['waterpark', 'wet-hair', 'life-jacket', 'waterline', 'rain-overlay', 'snow', 'lens-haze'],
+  fire: [
+    'glare',
+    'christmas-tree',
+    'thumb-up',
+    'peace-sign',
+    'bouquet',
+    'formalwear',
+    'raised-hands',
+    'clasped-hands',
+    'hand-gesture'
+  ],
+  grass: [
+    'food',
+    'spoon',
+    'chopsticks',
+    'restaurant',
+    'crowd',
+    'street',
+    'group',
+    'outdoor',
+    'classroom',
+    'sign',
+    'billboard'
+  ],
+  dark: [
+    'dark-background',
+    'eyes-closed',
+    'back-view',
+    'side-profile',
+    'low-quality',
+    'low-resolution',
+    'mask',
+    'negative-space',
+    'motion-blur',
+    'soft-focus',
+    'low-angle',
+    'surreal-composite',
+    'extreme-composition',
+    'accidental-framing',
+    'head-down'
   ]
 };
 
@@ -118,17 +137,34 @@ export function elementOf(card: Card): Element {
   return ELEMENTS[card.version % ELEMENTS.length];
 }
 
+const CATALOG_BY_ID: Map<string, Card> = new Map((manifest.cards as Card[]).map((card) => [card.id, card]));
+
+/** Catalog row used for abilities, visual tags and rarity normalization. Owned UUID rows point here via baseCardId. */
+export function catalogCard(card: Card): Card {
+  return CATALOG_BY_ID.get(card.baseCardId ?? card.id) ?? card;
+}
+
 export function battleStats(card: Card): CardBattleStats {
-  const scale = RARITY_SCALE[card.rarity];
+  const catalog = catalogCard(card);
+  // Normalize with the original catalog rarity. effectiveCard already applied the power-curve
+  // ratio, so using the promoted rarity's scale here would raise the card twice (and square XR).
+  const scale = RARITY_SCALE[catalog.rarity];
+  const derived: Card = {
+    ...catalog,
+    rarity: card.rarity,
+    attack: card.attack,
+    defense: card.defense,
+    luck: card.luck
+  };
   return {
     maxHp: Math.max(1, Math.round((40 + Math.round(card.defense * 0.62)) * scale)),
     atk: Math.max(1, Math.round(card.attack * BASE_STAT_SCALE * scale)),
     def: Math.max(1, Math.round(card.defense * BASE_STAT_SCALE * scale)),
     spd: 10 + Math.floor(card.luck / 4),
     crit: 5 + Math.floor(card.luck / 10),
-    element: elementOf(card),
+    element: elementOf(catalog),
     cost: RARITY_COST[card.rarity],
-    ability: abilityFor(card)
+    ability: abilityFor(derived)
   };
 }
 

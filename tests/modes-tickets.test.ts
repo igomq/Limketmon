@@ -16,8 +16,7 @@ env.DB = db;
 
 const game = await import('../lib/game.ts');
 const { OPPONENTS, MODE_LABELS, opponentById } = await import('../lib/battle/opponents.ts');
-const { pveFirstClearClaimKey, rollTicketDrop, ticketDropClaimKey } = await import('../lib/rewards.ts');
-const { buildSetup } = await import('../lib/battle/setup.ts');
+const { pveFirstClearClaimKey, ticketDropClaimKey, victoryTicketReward } = await import('../lib/rewards.ts');
 const { advance, createBattle } = await import('../lib/battle/engine.ts');
 const { aiDecision } = await import('../lib/battle/ai.ts');
 const { cardIdsByRarity, seedOwned } = await import('./helpers/seed.ts');
@@ -82,8 +81,8 @@ test('mode difficulty scales HP/ATK/DEF and first-clear credits (1x/2x/4x)', () 
   const hard = opponentById('boss', 'hard');
   const chaos = opponentById('boss', 'chaos');
   assert.ok(base);
-  assert.equal(base.statScale, 1.06, 'normal raises base stats');
-  assert.equal(hard!.statScale, 1.5, 'hard raises stats');
+  assert.ok(Math.abs((base.statScale ?? 0) - 1.06 * 1.2) < 1e-9, 'normal boss is +20% on the 1.06 band');
+  assert.ok(Math.abs((hard!.statScale ?? 0) - 1.5 * 0.92) < 1e-9, 'hard boss is pulled back');
   assert.equal(chaos!.statScale, 2.1, 'chaos raises stats');
   assert.equal(hard!.reward.credits, base!.reward.credits * 2);
   assert.equal(chaos!.reward.credits, base!.reward.credits * 4);
@@ -94,7 +93,7 @@ test('mode difficulty scales HP/ATK/DEF and first-clear credits (1x/2x/4x)', () 
   assert.notEqual(pveFirstClearClaimKey('rookie', 'hard'), pveFirstClearClaimKey('rookie', 'normal'));
 });
 
-test('guaranteed ticket pulls floor the rarity, spend only their balance, and never touch pity', async () => {
+test('guaranteed ticket pulls floor the rarity and spend only their own balance', async () => {
   reset();
   await db.prepare('UPDATE user_game_state SET sr_tickets = 3, ssr_tickets = 2, pity_counter = 12 WHERE user_id = ?').bind(USER).run();
 
@@ -102,12 +101,10 @@ test('guaranteed ticket pulls floor the rarity, spend only their balance, and ne
   assert.ok(['SR', 'SSR', 'UR'].includes(sr.results[0]!.card.rarity));
   assert.equal(sr.snapshot.tickets.sr, 2);
   assert.equal(sr.snapshot.tickets.ssr, 2);
-  assert.equal(await pityOf(), 12, 'a guaranteed pull does not dilute or reset normal pity');
 
   const ssr = await game.pullCards(USER, 1, 'ssr');
   assert.ok(['SSR', 'UR'].includes(ssr.results[0]!.card.rarity));
   assert.equal(ssr.snapshot.tickets.ssr, 1);
-  assert.equal(await pityOf(), 12, 'SSR+ guarantees still leave the normal ladder alone');
 
   // Guaranteed multipulls are allowed and charge exactly their own balance.
   await db.prepare('UPDATE user_game_state SET sr_tickets = 10 WHERE user_id = ?').bind(USER).run();
@@ -115,7 +112,8 @@ test('guaranteed ticket pulls floor the rarity, spend only their balance, and ne
   assert.equal(ten.results.length, 10);
   assert.equal(ten.results.every((entry) => ['SR', 'SSR', 'UR'].includes(entry.card.rarity)), true);
   assert.equal(ten.snapshot.tickets.sr, 0);
-  assert.equal(await pityOf(), 12, 'a 10-ticket pull is still pity-neutral');
+  // The pity ladder is gone from the snapshot entirely.
+  assert.equal('pityRemaining' in ten.snapshot, false);
 });
 
 test('an unaffordable ticket pull rolls back cleanly and a 10-pull charges ten credits', async () => {
@@ -133,87 +131,73 @@ test('an unaffordable ticket pull rolls back cleanly and a 10-pull charges ten c
   assert.equal(await creditsOf(), 0);
 });
 
-test('100p coupon codes grant 20 guaranteed tickets, once, case-insensitively', async () => {
+test('coupon codes grant their fixed bundles, once, case-insensitively', async () => {
   reset();
+  // LIMKETMON now grants an SSR+ single, ten normal pulls, and fifty low tickets.
+  const welcome = await game.redeemCoupon(USER, ' limketmon ');
+  assert.equal(welcome.snapshot.tickets.ssr, 1);
+  assert.equal(welcome.snapshot.tickets.low, 50);
+  assert.equal(welcome.snapshot.credits, 10);
+  await assert.rejects(game.redeemCoupon(USER, 'LIMKETMON'), /이미 사용한 쿠폰/);
+
   const sr = await game.redeemCoupon(USER, ' limketmon_sr_100p ');
-  assert.deepEqual(sr.granted, { credits: 0, sr: 20, ssr: 0 });
+  assert.deepEqual(sr.granted, { credits: 0, low: 0, sr: 20, ssr: 0 });
   assert.equal(sr.snapshot.tickets.sr, 20);
   await assert.rejects(game.redeemCoupon(USER, 'LIMKETMON_SR_100P'), /이미 사용한 쿠폰/);
 
   const ssr = await game.redeemCoupon(USER, 'limketmon_ssr_100p');
-  assert.deepEqual(ssr.granted, { credits: 0, sr: 0, ssr: 20 });
-  assert.equal(ssr.snapshot.tickets.ssr, 20);
-
-  const credits = await game.redeemCoupon(USER, 'LIMKETMON');
-  assert.deepEqual(credits.granted, { credits: 100, sr: 0, ssr: 0 });
+  assert.deepEqual(ssr.granted, { credits: 0, low: 0, sr: 0, ssr: 20 });
+  assert.equal(ssr.snapshot.tickets.ssr, 21);
   await assert.rejects(game.redeemCoupon(USER, 'nope'), /유효하지 않은/);
 });
 
-test('the ticket drop odds are exclusive cumulative ranges for every mode', () => {
-  // rollTicketDrop takes the settlement's uniform private draw in [0, 1); each mode owns a
-  // half-open SR band, then a half-open SSR band, then no drop.
-  const cases: Array<[('normal' | 'hard' | 'chaos'), number, 'sr' | 'ssr' | null]> = [
-    ['normal', 0, 'sr'],
-    ['normal', 0.099999, 'sr'],
-    ['normal', 0.1, 'ssr'],
-    ['normal', 0.119999, 'ssr'],
-    ['normal', 0.12, null],
-    ['normal', 0.999999, null],
-    ['hard', 0, 'sr'],
-    ['hard', 0.199999, 'sr'],
-    ['hard', 0.2, 'ssr'],
-    ['hard', 0.249999, 'ssr'],
-    ['hard', 0.25, null],
-    ['hard', 0.999999, null],
-    ['chaos', 0, 'sr'],
-    ['chaos', 0.299999, 'sr'],
-    ['chaos', 0.3, 'ssr'],
-    ['chaos', 0.399999, 'ssr'],
-    ['chaos', 0.4, null],
-    ['chaos', 0.999999, null]
-  ];
-  for (const [mode, unit, expected] of cases) {
-    assert.equal(rollTicketDrop(mode, unit), expected, `${mode} draw ${unit} should be ${expected}`);
-  }
+test('the win ticket is fixed per mode and opponent', () => {
+  // Normal pays low tickets for the lower opponents and normal tickets for ace/boss.
+  assert.deepEqual(victoryTicketReward('normal', 'rookie'), { ticketType: 'low', quantity: 2 });
+  assert.deepEqual(victoryTicketReward('normal', 'regular'), { ticketType: 'low', quantity: 3 });
+  assert.deepEqual(victoryTicketReward('normal', 'veteran'), { ticketType: 'low', quantity: 4 });
+  assert.deepEqual(victoryTicketReward('normal', 'ace'), { ticketType: 'normal', quantity: 2 });
+  assert.deepEqual(victoryTicketReward('normal', 'boss'), { ticketType: 'normal', quantity: 3 });
+  // Hard pays normal tickets, and an SR+ pair for the boss.
+  assert.deepEqual(victoryTicketReward('hard', 'rookie'), { ticketType: 'normal', quantity: 3 });
+  assert.deepEqual(victoryTicketReward('hard', 'regular'), { ticketType: 'normal', quantity: 4 });
+  assert.deepEqual(victoryTicketReward('hard', 'veteran'), { ticketType: 'normal', quantity: 5 });
+  assert.deepEqual(victoryTicketReward('hard', 'ace'), { ticketType: 'normal', quantity: 6 });
+  assert.deepEqual(victoryTicketReward('hard', 'boss'), { ticketType: 'sr', quantity: 2 });
+  // Chaos pays SR+, with an SSR+ pair for ace/boss.
+  assert.deepEqual(victoryTicketReward('chaos', 'rookie'), { ticketType: 'sr', quantity: 2 });
+  assert.deepEqual(victoryTicketReward('chaos', 'regular'), { ticketType: 'sr', quantity: 3 });
+  assert.deepEqual(victoryTicketReward('chaos', 'veteran'), { ticketType: 'sr', quantity: 4 });
+  assert.deepEqual(victoryTicketReward('chaos', 'ace'), { ticketType: 'ssr', quantity: 2 });
+  assert.deepEqual(victoryTicketReward('chaos', 'boss'), { ticketType: 'ssr', quantity: 3 });
 });
 
-test('the ticket drop is a private settlement draw, persisted once and never paid twice', async () => {
+test('every win pays its ticket and the first clear pays it once more', async () => {
   reset();
-  const deck = await makeStrongDeck('드랍 덱');
+  const deck = await makeStrongDeck('보상 덱');
 
-  // Force the settlement's private draw to a normal-mode SR roll (unit < 0.1). The battle seed
-  // itself is still a real crypto draw, so public-seed unpredictability is untouched.
-  const srWin = await winWithDrop(deck.id, 'rookie', 0.05);
-  const srLines = srWin.summary.rewards.filter((line) => line.ticketType);
-  assert.equal(srLines.length, 1, 'a forced SR drop appears once in the settled summary');
-  assert.equal(srLines[0]!.ticketType, 'sr');
-  assert.equal(srLines[0]!.credits, 0, 'a ticket line never pays credits');
-  assert.equal(srLines[0]!.quantity, 1);
+  // Normal rookie: low x2 every win, plus low x2 extra on the first clear → two lines, 4 total.
+  const win = await winOnce(deck.id, 'rookie');
+  const lines = win.summary.rewards.filter((line) => line.ticketType === 'low');
+  assert.equal(lines.reduce((sum, line) => sum + (line.quantity ?? 0), 0), 4, 'first rookie clear: 2 win + 2 first-clear extra');
+  assert.equal(lines.every((line) => line.credits === 0), true, 'a ticket line never pays credits');
+  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 4, sr: 0, ssr: 0 });
 
-  // The persisted claim, the returned reward line, and the ticket balance all agree.
-  const srClaim = await claimOf(srWin.battleId);
-  assert.equal(srClaim?.ticket_type, 'sr');
-  assert.equal(Number(srClaim?.ticket_quantity), 1);
-  assert.equal(Number(srClaim?.credits), 0);
-  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { sr: 1, ssr: 0 });
-  assert.equal(await ticketOf('sr_tickets'), 1);
-  assert.equal(await ticketOf('ssr_tickets'), 0);
-  // The credit balance equals the credits actually listed in the returned receipt.
-  assert.equal(await creditsOf(), srWin.summary.rewards.reduce((sum, line) => sum + line.credits, 0));
+  // The per-battle win payout claim and the returned receipt agree.
+  const claim = await claimOf(win.battleId);
+  assert.equal(claim?.ticket_type, 'low');
+  assert.equal(Number(claim?.ticket_quantity), 2);
+  assert.equal(Number(claim?.credits), 0);
 
-  // A second win forced to an SSR roll adds exactly one SSR ticket alongside the SR one.
-  const ssrWin = await winWithDrop(deck.id, 'rookie', 0.11);
-  const ssrLines = ssrWin.summary.rewards.filter((line) => line.ticketType);
-  assert.equal(ssrLines.length, 1);
-  assert.equal(ssrLines[0]!.ticketType, 'ssr');
-  assert.equal((await claimOf(ssrWin.battleId))?.ticket_type, 'ssr');
-  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { sr: 1, ssr: 1 });
+  // A repeat win pays only the win ticket.
+  const repeat = await winOnce(deck.id, 'rookie');
+  assert.equal(repeat.summary.rewards.filter((line) => line.label === '첫 격파 보상').length, 0);
+  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 6, sr: 0, ssr: 0 });
 
-  // Re-settling the same battle returns the identical receipt even when the private draw is forced
-  // to a different band, and never mints a second ticket.
-  const again = await withRandomUnit(0.999, () => game.finishBattle(USER, srWin.battleId, srWin.decisions, DAY));
-  assert.deepEqual(again, srWin.summary);
-  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { sr: 1, ssr: 1 });
+  // Re-settling the first battle returns the identical receipt and mints nothing.
+  const again = await game.finishBattle(USER, win.battleId, win.decisions, DAY);
+  assert.deepEqual(again, win.summary);
+  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 6, sr: 0, ssr: 0 });
 });
 
 test('concurrent distinct battles competing for same daily/first-clear pay exactly one winner', async () => {
@@ -261,7 +245,7 @@ test('P0 regression: insufficient balance or missing state cannot grant cards or
   // Test 1: Direct savePull with missing user_game_state row cannot grant cards or history
   const { savePull } = await import('../lib/pull.ts');
   await db.prepare('DELETE FROM user_game_state WHERE user_id = ?').bind(USER).run();
-  await assert.rejects(savePull(db, USER, [card], new Date(), 0, 1, 'normal'), /pity_changed/);
+  await assert.rejects(savePull(db, USER, [card], new Date(), 0, 1, 'normal'), /pull_state_missing/);
   assert.equal(countOf('inventory'), 0, 'no card granted for missing state');
   assert.equal(countOf('pull_history'), 0, 'no history written for missing state');
 
@@ -287,7 +271,7 @@ test('P0 regression: insufficient balance or missing state cannot grant cards or
 
 test('a settled battle is re-read from its real receipts, never a provisional summary', async () => {
   reset();
-  const deck = await makeDeck('영수증 덱');
+  const deck = await makeStrongDeck('영수증 덱');
   const win = await winOnce(deck.id, 'rookie');
   assert.ok(win.summary.rewards.length > 0, 'the first clear paid at least one reward line');
   const creditsAfterWin = await creditsOf();
@@ -321,7 +305,7 @@ test('a settled battle is re-read from its real receipts, never a provisional su
 
 test('progress reads stay bounded to known keys, indexed, and correct after many battles', async () => {
   reset();
-  const deck = await makeDeck('대량 덱');
+  const deck = await makeStrongDeck('대량 덱');
   await winOnce(deck.id, 'rookie');
   // Every repeat battle also leaves its own settle:<id> and ticket_drop:<id> rows behind.
   for (let index = 0; index < 400; index++) {
@@ -377,7 +361,7 @@ test('a loss never drops a ticket', async () => {
     const summary = await game.finishBattle(USER, setup.battleId, played.decisions, DAY);
     if (summary.result === 'won') continue;
     assert.equal(summary.rewards.some((line) => line.ticketType), false, 'a non-win pays no ticket');
-    assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { sr: 0, ssr: 0 });
+    assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 0, sr: 0, ssr: 0 });
     return;
   }
   throw new Error('an N deck never lost to the boss in 20 attempts');
@@ -386,11 +370,6 @@ test('a loss never drops a ticket', async () => {
 async function creditsOf(): Promise<number> {
   const row = (await db.prepare('SELECT pull_credits FROM user_game_state WHERE user_id = ?').bind(USER).first()) as { pull_credits: number };
   return Number(row.pull_credits);
-}
-
-async function pityOf(): Promise<number> {
-  const row = (await db.prepare('SELECT pity_counter FROM user_game_state WHERE user_id = ?').bind(USER).first()) as { pity_counter: number };
-  return Number(row.pity_counter);
 }
 
 async function ticketOf(column: 'sr_tickets' | 'ssr_tickets'): Promise<number> {
@@ -403,16 +382,16 @@ function countOf(table: string): number {
 }
 
 function play(setup: Awaited<ReturnType<typeof game.startBattle>>) {
-  const full = buildSetup({
+  const full = {
+    battleId: setup.battleId,
     kind: setup.kind,
     mode: setup.mode,
     opponentId: setup.opponentId,
     modifier: setup.modifier,
     seed: setup.seed,
-    playerCardIds: setup.player.map((entry) => entry.cardId),
-    playerEnhance: setup.player.map((entry: { enhance?: number }) => entry.enhance ?? 0),
-    battleId: setup.battleId
-  });
+    player: setup.player,
+    opponent: setup.opponent
+  };
   const profile = opponentById(setup.opponentId, setup.mode)!.profile;
   let state = createBattle(full);
   const decisions: Array<{ uid: string; action: 'attack' | 'skill' }> = [];
@@ -434,13 +413,11 @@ function play(setup: Awaited<ReturnType<typeof game.startBattle>>) {
 }
 
 async function winOnce(deckId: string, opponentId: string) {
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const setup = await game.startBattle(USER, { deckId, opponentId }, DAY);
-    const played = play(setup);
-    const summary = await game.finishBattle(USER, setup.battleId, played.decisions, DAY);
-    if (summary.result === 'won') return { battleId: setup.battleId, seed: setup.seed, decisions: played.decisions, summary };
-  }
-  throw new Error(`no win against ${opponentId} in 12 attempts`);
+  const setup = await game.startBattle(USER, { deckId, opponentId }, DAY);
+  const played = play(setup);
+  const summary = await game.finishBattle(USER, setup.battleId, played.decisions, DAY);
+  assert.equal(summary.result, 'won', 'controlled strong owned deck wins');
+  return { battleId: setup.battleId, seed: setup.seed, decisions: played.decisions, summary };
 }
 
 /**
@@ -461,35 +438,4 @@ async function claimOf(battleId: string) {
     .prepare('SELECT ticket_type, ticket_quantity, credits FROM reward_claims WHERE user_id = ? AND claim_key = ?')
     .bind(USER, ticketDropClaimKey(battleId))
     .first()) as { ticket_type: string | null; ticket_quantity: number; credits: number } | null;
-}
-
-/**
- * Runs settle-time work with the server's private crypto draw pinned to one uniform value, so the
- * ticket drop is exercised deterministically. Only randomUnit() reads crypto.getRandomValues during
- * settlement; the battle seed is drawn earlier, outside this window. Restored unconditionally.
- */
-async function withRandomUnit<T>(unit: number, run: () => Promise<T>): Promise<T> {
-  const webcrypto = globalThis.crypto;
-  const original = webcrypto.getRandomValues;
-  webcrypto.getRandomValues = ((array: Uint32Array) => {
-    array[0] = Math.floor(unit * 2 ** 32);
-    return array;
-  }) as typeof webcrypto.getRandomValues;
-  try {
-    return await run();
-  } finally {
-    webcrypto.getRandomValues = original;
-  }
-}
-
-async function winWithDrop(deckId: string, opponentId: string, unit: number) {
-  for (let attempt = 0; attempt < 12; attempt++) {
-    const setup = await game.startBattle(USER, { deckId, opponentId }, DAY);
-    const played = play(setup);
-    const summary = await withRandomUnit(unit, () =>
-      game.finishBattle(USER, setup.battleId, played.decisions, DAY)
-    );
-    if (summary.result === 'won') return { battleId: setup.battleId, seed: setup.seed, decisions: played.decisions, summary };
-  }
-  throw new Error(`no win against ${opponentId} with a forced drop in 12 attempts`);
 }

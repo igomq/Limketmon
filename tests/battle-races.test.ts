@@ -1,6 +1,6 @@
-// Regression tests for the concurrency holes an adversarial audit found: pity farming with
-// parallel pulls, the starter-deck race that turned a committed pull into a 503, the deck cap,
-// daily reward banking across KST midnight, and unbounded pending battles.
+// Regression tests for the concurrency holes an adversarial audit found: parallel-pull credit
+// overdraw, the starter-deck race that turned a committed pull into a 503, the deck cap, daily
+// reward banking across KST midnight, and unbounded pending battles.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -32,33 +32,20 @@ function reset() {
   db.exec(`INSERT INTO user_game_state (user_id, pull_credits, last_free_pull_date, pity_counter) VALUES ('${USER}', 0, NULL, 0)`);
 }
 
-test('parallel pulls cannot farm the hard pity', async () => {
+test('parallel pulls each charge one credit and can never overdraw the pool', async () => {
   reset();
-  // Today's free pull is already spent, so every successful pull costs exactly one credit.
-  await db.prepare('UPDATE user_game_state SET pity_counter = ?, pull_credits = 100, last_free_pull_date = ? WHERE user_id = ?')
-    .bind(59, kstDate(new Date()), USER)
+  // Today's free pull is already spent, so every successful pull costs exactly one credit. The
+  // balance only covers four of these, so the rest must be refused inside their transaction.
+  await db.prepare('UPDATE user_game_state SET pull_credits = 4, last_free_pull_date = ? WHERE user_id = ?')
+    .bind(kstDate(new Date()), USER)
     .run();
-  // Ten pulls fired at once. Without the compare-and-set every one of them reads counter 59 and
-  // the hard-pity guarantee fires ten times.
   const settled = await Promise.all(Array.from({ length: 10 }, () => game.pullCards(USER, 1).catch(() => null)));
-  const rares = settled.filter((entry) => entry && ['SSR', 'UR'].includes(entry.results[0]!.card.rarity)).length;
-  assert.ok(rares < 10, 'the guarantee is not granted to every parallel caller');
-
-  const history = (await db.prepare('SELECT rarity, id FROM pull_history WHERE user_id = ? ORDER BY rowid').bind(USER).all()).results as Array<{ rarity: string }>;
   const reported = settled.filter(Boolean).length;
-  assert.equal(history.length, reported, 'every reported pull is also stored');
-  assert.equal(await creditsOf(USER), 100 - reported, 'one charge per reported pull, and no charge for a refused one');
+  assert.ok(reported > 0 && reported <= 4, `only the affordable pulls settle (${reported})`);
 
-  // The stored counter must never run BEHIND the pulls it is derived from: a counter that lags
-  // would hand out the improved odds again for the same run. A counter at or ahead of the run is
-  // player-favourable and not exploitable, so it is allowed here.
-  // ponytail: the compare-and-set keeps one pull per counter value; it does not try to make the
-  // committed value exactly reproduce the history, which would need a per-user pull lock.
-  let expected = 0;
-  for (const row of history) expected = row.rarity === 'SSR' || row.rarity === 'UR' ? 0 : expected + 1;
-  const state = await db.prepare('SELECT pity_counter FROM user_game_state WHERE user_id = ?').bind(USER).first() as { pity_counter: number };
-  assert.ok(Number(state.pity_counter) >= expected, 'the counter never falls behind the stored pulls');
-  assert.ok(Number(state.pity_counter) <= 60, 'the counter stays inside its documented range');
+  const history = (await db.prepare('SELECT rarity FROM pull_history WHERE user_id = ?').bind(USER).all()).results as Array<{ rarity: string }>;
+  assert.equal(history.length, reported, 'every reported pull is also stored');
+  assert.equal(await creditsOf(USER), 4 - reported, 'one charge per settled pull, never negative');
 });
 
 async function creditsOf(userId: string): Promise<number> {

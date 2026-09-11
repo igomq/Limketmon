@@ -66,16 +66,16 @@ test('signed-in player can pull, build a deck, battle, get paid, and replay', as
   // 2. The welcome coupon adds credits, and cannot be used twice.
   const coupon = await couponRoute.POST(post('/api/coupon', { code: 'LIMKETMON' }));
   assert.equal(coupon.status, 200);
-  assert.equal((await json<{ snapshot: { credits: number } }>(coupon)).snapshot.credits, 100);
+  assert.equal((await json<{ snapshot: { credits: number } }>(coupon)).snapshot.credits, 10);
   const again = await couponRoute.POST(post('/api/coupon', { code: 'LIMKETMON' }));
   assert.equal(again.status, 400);
 
   // 3. A five-card pull charges exactly five credits.
   const five = await pullRoute.POST(post('/api/pull', { count: 5 }));
-  const fiveBody = await json<{ results: unknown[]; snapshot: { credits: number; pityRemaining: number } }>(five);
+  const fiveBody = await json<{ results: unknown[]; snapshot: { credits: number; tickets: { low: number; sr: number; ssr: number } } }>(five);
   assert.equal(fiveBody.results.length, 5);
-  assert.equal(fiveBody.snapshot.credits, 95);
-  assert.ok(fiveBody.snapshot.pityRemaining <= 60 && fiveBody.snapshot.pityRemaining > 0);
+  assert.equal(fiveBody.snapshot.credits, 5);
+  assert.equal('pityRemaining' in fiveBody.snapshot, false, 'the pity ladder is gone from the snapshot');
 
   // 4. Keep pulling until at least three distinct cards exist, so a deck can be built.
   let state = await json<{ snapshot: { inventory: Array<{ cardId: string }>; decks: unknown[] } }>(await stateRoute.GET());
@@ -115,7 +115,7 @@ test('signed-in player can pull, build a deck, battle, get paid, and replay', as
   // 8. Rewards are reflected in the next state read.
   const after = await json<{ snapshot: { credits: number; stats: { battles: number; wins: number }; clearedOpponents: string[] } }>(await stateRoute.GET());
   assert.equal(after.snapshot.stats.battles, 1);
-  assert.equal(after.snapshot.credits, 95 + summary.rewards.reduce((sum, line) => sum + line.credits, 0));
+  assert.equal(after.snapshot.credits, 5 + summary.rewards.reduce((sum, line) => sum + line.credits, 0));
   if (summary.result === 'won') assert.deepEqual(after.snapshot.clearedOpponents, ['rookie']);
 
   // 9. Re-settling the same battle pays nothing more and returns the same answer.

@@ -38,24 +38,22 @@ test('enhanceMaterials keeps one base copy and canEnhance agrees at the boundari
 });
 
 test('enhancePower hits the documented landmarks within 15% and grows strictly', () => {
-  // Approximate bands: N5~R3~SR0, N10~R5~SR2~SSR0, N15~R10~SR6~SSR3~UR0.
-  const groups: Array<Array<[Rarity, number]>> = [
-    [['N', 5], ['R', 3], ['SR', 0]],
-    [['N', 10], ['R', 5], ['SR', 2], ['SSR', 0]],
-    [['N', 15], ['R', 10], ['SR', 6], ['SSR', 3], ['UR', 0]]
-  ];
-  for (const group of groups) {
-    const values = group.map(([rarity, level]) => enhancePower(rarity, level));
-    const max = Math.max(...values);
-    for (const value of values) {
-      assert.ok((max - value) / max <= 0.15, `group spread ${JSON.stringify(group)}: ${value} vs ${max}`);
-    }
-  }
-  // Exact coincidences the curve guarantees, so the cheap deck genuinely catches up.
-  assert.ok(Math.abs(enhancePower('N', 5) - enhancePower('SR', 0)) < 1e-9);
-  assert.ok(Math.abs(enhancePower('N', 10) - enhancePower('SSR', 0)) < 1e-9);
-  assert.ok(Math.abs(enhancePower('N', 15) - enhancePower('UR', 0)) < 1e-9);
-  for (const rarity of ['N', 'R', 'SR', 'SSR', 'UR'] as const) {
+  // N/R still share the old bands. SR/SSR/UR sit 3/6/10% above them; XR is UR * 1.35.
+  const near = (left: number, right: number, label: string) => {
+    assert.ok(Math.abs(left - right) / right <= 0.15, `${label}: ${left} vs ${right}`);
+  };
+  near(enhancePower('N', 5), enhancePower('R', 3), 'N5~R3');
+  near(enhancePower('N', 5), 1.55, 'N5~old SR0');
+  near(enhancePower('SR', 0), 1.55 * 1.03, 'SR0 is +3%');
+  assert.equal(enhancePower('N', 10), 2.4);
+  assert.equal(enhancePower('R', 5), 2.075);
+  near(enhancePower('SSR', 0), 2.4 * 1.06, 'SSR0 is +6%');
+  near(enhancePower('UR', 0), 3.55 * 1.1, 'UR0 is +10%');
+  near(enhancePower('XR', 0), enhancePower('UR', 0) * 1.35, 'XR is UR*1.35');
+  assert.ok(enhancePower('SR', 0) > 1.55);
+  assert.ok(enhancePower('SSR', 0) > 2.4);
+  assert.ok(enhancePower('UR', 0) > 3.55);
+  for (const rarity of ['N', 'R', 'SR', 'SSR', 'UR', 'XR'] as const) {
     for (let level = 0; level < MAX_ENHANCE; level++) {
       assert.ok(enhancePower(rarity, level + 1) > enhancePower(rarity, level), `${rarity}@${level}`);
     }
@@ -93,9 +91,9 @@ env.DB = db;
 const game = await import('../lib/game.ts');
 
 test('enhancing consumes copies, keeps one, and the battle snapshot uses the new level', async () => {
-  db.exec('DELETE FROM inventory');
-  db.exec('DELETE FROM decks');
   db.exec('DELETE FROM deck_cards');
+  db.exec('DELETE FROM decks');
+  db.exec('DELETE FROM inventory');
   db.exec('DELETE FROM battles');
   db.exec('DELETE FROM users');
   db.exec('DELETE FROM user_game_state');
@@ -118,19 +116,23 @@ test('enhancing consumes copies, keeps one, and the battle snapshot uses the new
   assert.equal(updated.enhanceLevel, 1);
   assert.equal(updated.quantity, item.quantity - 1);
 
-  await assert.rejects(game.enhanceCard(USER, 'nope'), /찾을 수 없습니다/);
+  await assert.rejects(game.enhanceCard(USER, 'nope'), (error: unknown) => error instanceof game.GameError && error.code === 'not_owned');
 
   const deck = (await game.createDeck(USER, '강화 덱', owned)).find((entry) => entry.name === '강화 덱')!;
   const setup = await game.startBattle(USER, { deckId: deck.id, opponentId: 'rookie' }, new Date('2026-09-10T03:00:00Z'));
   const card = cards.find((entry) => entry.id === owned[0])!;
   const expected = applyEnhance(battleStats(card), 1, card.rarity);
   assert.equal(setup.player[0]!.enhance, 1);
-  assert.equal(setup.player[0]!.atk, expected.atk);
-  assert.equal(setup.player[0]!.def, expected.def);
-  assert.equal(setup.player[0]!.maxHp, expected.maxHp);
+  const role = setup.player[0]!.position;
+  const bulk = role === 'healer' || role === 'tank' ? 1.1 : 1;
+  assert.equal(setup.player[0]!.atk, Math.round(expected.atk * (role === 'dealer' ? 1.05 : 1)));
+  assert.equal(setup.player[0]!.def, Math.round(expected.def * bulk));
+  assert.equal(setup.player[0]!.maxHp, Math.round(expected.maxHp * bulk));
 });
 
 test('spending three materials from four copies keeps the base, and a shortfall is reported', async () => {
+  db.exec('DELETE FROM deck_cards');
+  db.exec('DELETE FROM decks');
   db.exec('DELETE FROM inventory');
   const ids = cardIdsByRarity({ N: 2 });
   const rich = ids[0]!;

@@ -43,11 +43,15 @@ test('every migration applies to a fresh database and creates the full schema', 
     ]);
     // The columns the game layer writes must exist, with the defaults the code assumes.
     assert.deepEqual(columns(sql, 'user_game_state').sort(), [
+      'fragments',
       'last_free_pull_date',
+      'low_tickets',
       'pity_counter',
+      'proof',
       'pull_credits',
       'sr_tickets',
       'ssr_tickets',
+      'twin_proof',
       'user_id'
     ]);
     assert.ok(columns(sql, 'battles').includes('decisions'));
@@ -147,22 +151,22 @@ test('db/schema.ts and the migrations agree on the table set', () => {
 
 test('the migrated schema accepts the app write path', () => {
   // A smoke test through the D1 shim: the exact statements lib/pull.ts and lib/game.ts issue must
-  // run against the real migrated schema, including the RETURNING clause and the pity delta.
+  // run against the real migrated schema, including the RETURNING clause.
   const d1 = createD1();
   for (const file of files) migrate(d1, sqlOf(file));
   d1.exec("INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1', 'a@x', '2026-09-01', '2026-09-01')");
   d1.exec("INSERT INTO user_game_state (user_id, pull_credits, last_free_pull_date) VALUES ('u1', 10, NULL)");
   return import('../lib/pull.ts').then(async ({ savePull }) => {
     const card = { id: 'imsingyu-v001', rarity: 'SR' } as Parameters<typeof savePull>[2][number];
-    const counter = await d1.prepare('SELECT pity_counter AS c FROM user_game_state WHERE user_id = ?').bind('u1').first() as { c: number };
-    const results = await savePull(d1 as unknown as D1Database, 'u1', [card, card, card, card, card], new Date('2026-09-10T03:00:00Z'), Number(counter.c), Number(counter.c) + 5);
+    // fromPity/pityTo are ignored compatibility args; the batch charges five credits for five cards.
+    const results = await savePull(d1 as unknown as D1Database, 'u1', [card, card, card, card, card], new Date('2026-09-10T03:00:00Z'), 0, 0);
     assert.deepEqual(results.map((row) => row.quantity), [1, 2, 3, 4, 5]);
     const state = await d1.prepare('SELECT pull_credits, pity_counter FROM user_game_state WHERE user_id = ?').bind('u1').first() as {
       pull_credits: number;
       pity_counter: number;
     };
-    assert.equal(state.pity_counter, 5, 'the pity delta lands in the same transaction');
-    assert.equal(state.pull_credits, 5);
+    assert.equal(state.pull_credits, 5, 'five pulls charge five credits in the same transaction');
+    assert.equal(state.pity_counter, 0, 'the pull no longer writes the pity column');
     d1.close();
   });
 });

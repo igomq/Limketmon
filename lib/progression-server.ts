@@ -1,0 +1,148 @@
+import 'server-only';
+import { getDatabase } from '../db/index';
+import { cards as catalog, GameError, getSnapshot, ownedRows, progressOf, type OwnedRow, ownedRowGuard } from './game';
+import { RARITY_ORDER, type Rarity } from './rules';
+import { TRAIT_IDS, MAX_TRAIT_LEVEL, traitCost, nextRarity, dismantleReward, fragmentChance, fusionRarity, fusionMinEnhance, type TraitId, type CardProgress } from './progression';
+
+type Selection = { cardId: string; quantity: number };
+const fail = (message: string): never => { throw new GameError('invalid_progression', message); };
+const id = (raw: unknown): string => typeof raw === 'string' && raw.length > 0 && raw.length <= 128 ? raw : fail('카드를 선택해주세요.');
+const integer = (raw: unknown, min: number, max: number): number => typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= min && raw <= max ? raw : fail('수량이 올바르지 않습니다.');
+function selection(raw: unknown): Selection[] {
+  if (!Array.isArray(raw) || !raw.length || raw.length > 500) return fail('소비할 카드를 선택해주세요.');
+  const seen = new Set<string>();
+  return raw.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return fail('카드 정보가 올바르지 않습니다.');
+    const cardId = id(entry.cardId);
+    if (seen.has(cardId)) return fail('같은 보유 카드는 한 항목으로 입력해주세요.');
+    seen.add(cardId);
+    return { cardId, quantity: integer(entry.quantity, 1, 1_000_000) };
+  });
+}
+function randomUnit(): number { return crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32; }
+
+export async function applyProgression(userId: string, raw: unknown) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('요청이 올바르지 않습니다.');
+  const body = raw as Record<string, unknown>;
+  const action = body.action;
+  if (!['dismantle', 'bulk-dismantle', 'trait', 'craft-twin', 'transcend', 'fuse'].includes(String(action))) return fail('알 수 없는 성장 작업입니다.');
+  if (body.preview !== undefined && typeof body.preview !== 'boolean') return fail('미리보기 값이 올바르지 않습니다.');
+  const db = getDatabase();
+  const rows = await ownedRows(userId);
+  const owned = new Map(rows.map((row) => [row.card_id, row]));
+  const lookup = (cardId: string): OwnedRow => owned.get(cardId) ?? fail('보유하지 않은 카드입니다.');
+  const deckResult = await db.prepare('SELECT c.card_id FROM deck_cards c JOIN decks d ON d.id = c.deck_id WHERE d.user_id = ?').bind(userId).all();
+  const deployed = new Set((deckResult.results as { card_id: string }[]).map((row) => row.card_id));
+  const writes: D1PreparedStatement[] = [];
+  const guard = (row: OwnedRow) => writes.push(ownedRowGuard(db, userId, row));
+  const consume = (entry: Selection) => {
+    const row = lookup(entry.cardId);
+    if (entry.quantity > row.quantity) return fail('보유 수량이 부족합니다.');
+    if (entry.quantity === row.quantity && deployed.has(row.card_id)) return fail('덱에 쓰는 마지막 카드는 소비할 수 없습니다.');
+    guard(row);
+    if (entry.quantity === row.quantity) writes.push(db.prepare('DELETE FROM inventory WHERE user_id = ? AND card_id = ?').bind(userId, row.card_id));
+    else writes.push(db.prepare('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?').bind(entry.quantity, userId, row.card_id));
+  };
+  const insert = (progress: CardProgress) => {
+    const cardId = crypto.randomUUID();
+    writes.push(db.prepare('INSERT INTO inventory (user_id, card_id, quantity, first_obtained_at, enhance_level, base_card_id, rarity_override, traits) VALUES (?, ?, 1, ?, ?, ?, ?, ?)')
+      .bind(userId, cardId, new Date().toISOString(), progress.enhanceLevel, progress.baseCardId, progress.rarity, JSON.stringify(progress.traits)));
+    return cardId;
+  };
+  let cardId: string | undefined;
+  let message = '성장을 완료했어요.';
+  if (action === 'dismantle' || action === 'bulk-dismantle' || action === 'fuse') {
+    let selected: Selection[];
+    if (action === 'bulk-dismantle') {
+      if (!RARITY_ORDER.includes(body.rarity as Rarity) || typeof body.includeBase !== 'boolean') return fail('분해 조건이 올바르지 않습니다.');
+      const max = integer(body.maxEnhance, 0, 15);
+      selected = rows.filter((row) => progressOf(row).rarity === body.rarity && row.enhance_level <= max)
+        .map((row) => ({ cardId: row.card_id, quantity: row.quantity - (body.includeBase && !deployed.has(row.card_id) ? 0 : 1) }))
+        .filter((entry) => entry.quantity > 0);
+      // A bulk filter must first become an exact, reviewable selection. The confirmed request
+      // uses action=dismantle with these ids/counts, never reruns a mutable filter.
+      if (body.preview !== true) return fail('일괄 분해는 미리보기 후 정확한 카드 목록으로 확인해주세요.');
+    } else selected = selection(body.cards);
+    if (!selected.length) return fail('조건에 맞는 카드가 없습니다.');
+    for (const entry of selected) {
+      const row = lookup(entry.cardId);
+      if (entry.quantity > row.quantity) return fail('보유 수량이 부족합니다.');
+      if (entry.quantity === row.quantity && deployed.has(row.card_id)) return fail('덱에 쓰는 마지막 카드는 소비할 수 없습니다.');
+    }
+    if (selected.reduce((sum, entry) => sum + entry.quantity, 0) > 100_000) return fail('한 번에 최대 100,000장까지 처리할 수 있습니다.');
+    const warned = selected.some((entry) => { const p = progressOf(lookup(entry.cardId)); return p.enhanceLevel > 0 || p.traits.length > 0; });
+    const proof = selected.reduce((sum, entry) => sum + entry.quantity * dismantleReward(progressOf(lookup(entry.cardId)).rarity), 0);
+    const minFragments = selected.reduce((sum, entry) => sum + (fragmentChance(progressOf(lookup(entry.cardId)).rarity) >= 1 ? entry.quantity : 0), 0);
+    let outputRarity: Rarity | null = null;
+    let pool = catalog;
+    if (action === 'fuse') {
+      const count = integer(body.count, 2, 3) as 2 | 3;
+      if (selected.reduce((sum, entry) => sum + entry.quantity, 0) !== count) return fail('합성 재료 수량이 맞지 않습니다.');
+      const rarity = progressOf(lookup(selected[0]!.cardId)).rarity;
+      outputRarity = fusionRarity(rarity, count);
+      if (!outputRarity || selected.some((entry) => { const p = progressOf(lookup(entry.cardId)); return p.rarity !== rarity || p.enhanceLevel < fusionMinEnhance(rarity, count); })) return fail('합성 등급 또는 강화 조건이 맞지 않습니다.');
+      const excluded = new Set(selected.map((entry) => progressOf(lookup(entry.cardId)).baseCardId));
+      pool = catalog.filter((card) => card.rarity === outputRarity && (count === 3 || !excluded.has(card.id)));
+      if (!pool.length) return fail('생성 가능한 다른 카드가 없습니다.');
+    }
+    if (body.preview) return { preview: { cards: selected, proof: action === 'fuse' ? 0 : proof, minFragments: action === 'fuse' ? 0 : minFragments, warning: warned ? '강화 또는 특성이 있는 카드가 소비됩니다. 되돌릴 수 없습니다.' : '선택한 카드가 소비됩니다. 되돌릴 수 없습니다.' } };
+    for (const entry of selected) consume(entry);
+    if (action === 'fuse') {
+      const base = pool[Math.floor(randomUnit() * pool.length)]!;
+      cardId = insert({ baseCardId: base.id, rarity: outputRarity!, enhanceLevel: 0, traits: [] });
+      message = '합성 카드를 획득했어요.';
+    } else {
+      let fragments = 0;
+      for (const entry of selected) {
+        const chance = fragmentChance(progressOf(lookup(entry.cardId)).rarity);
+        if (chance >= 1) fragments += entry.quantity;
+        else for (let i = 0; i < entry.quantity; i++) if (randomUnit() < chance) fragments++;
+      }
+      writes.push(db.prepare('UPDATE user_game_state SET proof = proof + ?, fragments = fragments + ? WHERE user_id = ?').bind(proof, fragments, userId));
+      message = `분해 완료: 증거 ${proof}개, 파편 ${fragments}개를 얻었어요.`;
+    }
+  } else if (action === 'craft-twin') {
+    if (body.preview) return fail('이 작업은 미리보기를 지원하지 않습니다.');
+    writes.push(db.prepare('UPDATE user_game_state SET fragments = fragments - 5, twin_proof = twin_proof + 1 WHERE user_id = ?').bind(userId));
+    message = '쌍둥이 임신의 증거 1개를 만들었어요.';
+  } else {
+    const row = lookup(id(body.cardId));
+    if (!TRAIT_IDS.includes(body.traitId as TraitId)) return fail('특성을 선택해주세요.');
+    const traitId = body.traitId as TraitId;
+    const progress = progressOf(row);
+    const existing = progress.traits.find((trait) => trait.id === traitId);
+    if (action === 'trait') {
+      if (body.preview) return fail('이 작업은 미리보기를 지원하지 않습니다.');
+      if ((!existing && progress.traits.length >= 2) || (existing && existing.level >= MAX_TRAIT_LEVEL)) return fail('더 강화할 수 없는 특성입니다.');
+      const cost = traitCost(progress.rarity, existing?.level ?? 0);
+      guard(row);
+      writes.push(db.prepare('UPDATE user_game_state SET proof = proof - ? WHERE user_id = ?').bind(cost, userId));
+      if (existing) existing.level++;
+      else progress.traits.push({ id: traitId, level: 1, transcended: false });
+      writes.push(db.prepare('UPDATE inventory SET traits = ? WHERE user_id = ? AND card_id = ?').bind(JSON.stringify(progress.traits), userId, row.card_id));
+      message = '특성을 강화했어요.';
+    } else {
+      const rarity = nextRarity(progress.rarity);
+      if (!rarity || progress.enhanceLevel < 5 || !existing || existing.level < 10 || existing.transcended) return fail('초월 조건이 맞지 않습니다.');
+      if (body.preview) return { preview: { cards: [{ cardId: row.card_id, quantity: 1 }], proof: 0, minFragments: 0, warning: '원본 1장과 쌍둥이 증거 1개를 소비하고 초월 카드 1장을 만듭니다.' } };
+      guard(row);
+      writes.push(db.prepare('UPDATE user_game_state SET twin_proof = twin_proof - 1 WHERE user_id = ?').bind(userId));
+      existing.transcended = true;
+      cardId = insert({ ...progress, rarity });
+      if (row.quantity === 1) {
+        writes.push(db.prepare('UPDATE deck_cards SET card_id = ? WHERE card_id = ? AND deck_id IN (SELECT id FROM decks WHERE user_id = ?)').bind(cardId, row.card_id, userId));
+        deployed.delete(row.card_id);
+      }
+      consume({ cardId: row.card_id, quantity: 1 });
+      message = '초월 카드를 획득했어요.';
+    }
+  }
+  try { await db.batch(writes); }
+  catch (error) {
+    if (error instanceof Error && /chk_user_game_state_credits|not_enough_materials|card_in_deck/.test(error.message)) {
+      throw new GameError('progression_conflict', '재료가 부족하거나 보유 상태가 바뀌었어요. 다시 확인해주세요.');
+    }
+    throw error;
+  }
+  return { snapshot: await getSnapshot(userId), message, ...(cardId ? { cardId } : {}) };
+}

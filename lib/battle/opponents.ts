@@ -33,6 +33,18 @@ const MODE_TUNING: Record<BattleMode, ModeTuning> = {
   chaos: { hp: 2.1, stat: 2.1, heal: 0.7, appetite: 1.4, ruthless: true }
 };
 
+/**
+ * HP/ATK/DEF adjustment per (mode, opponent), applied on top of MODE_TUNING and stated relative to
+ * the scale that opponent already had: normal ace x1.18 and boss x1.2, hard rookie..ace x1.15 and
+ * hard boss x0.92, chaos untouched. Players gain traits and positions this round, so the ladder
+ * moves with them; any single number here is a tuning knob, not a rule.
+ */
+const MODE_OPPONENT_DELTA: Record<BattleMode, Record<string, number>> = {
+  normal: { ace: 1.18, boss: 1.2 },
+  hard: { rookie: 1.15, regular: 1.15, veteran: 1.15, ace: 1.15, boss: 0.92 },
+  chaos: {}
+};
+
 export const OPPONENTS: Opponent[] = [
   {
     id: 'rookie',
@@ -103,10 +115,11 @@ export function opponentById(id: string, mode: BattleMode = 'normal'): Opponent 
   const base = OPPONENTS.find((opponent) => opponent.id === id);
   if (!base) return undefined;
   const tuning = MODE_TUNING[mode];
+  const delta = MODE_OPPONENT_DELTA[mode][base.id] ?? 1;
   return {
     ...base,
-    hpScale: base.hpScale * tuning.hp,
-    statScale: tuning.stat,
+    hpScale: base.hpScale * tuning.hp * delta,
+    statScale: tuning.stat * delta,
     profile: {
       ...base.profile,
       healBelow: base.profile.healBelow * tuning.heal,

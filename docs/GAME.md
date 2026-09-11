@@ -2,56 +2,51 @@
 
 이 문서는 카드 도감과 배틀을 잇는 수치와 규칙의 근거를 정리합니다. 모든 값은 `lib/` 소스에서만
 유도되고, 화면은 규칙을 다시 계산하지 않습니다. 카드를 추가하는 일반 절차는 [README](../README.md)의
-"카드 추가" 절차를 따릅니다.
+"카드 추가" 절차를 따릅니다. 현재 성장·속성·보상 수치는 [카드 성장 규칙](CARD_GROWTH.md)을 기준으로 합니다.
 
 ## 카드에서 스탯 유도
 
-`lib/battle/stats.ts`(`STAT_RULESET` 3)가 큐레이션 카드 하나를 전투 스탯으로 바꿉니다. 같은 카드는
+`lib/battle/stats.ts`가 큐레이션 카드 하나를 전투 스탯으로 바꿉니다. 같은 카드는
 언제나 같은 스탯을 냅니다.
 
-| 스탯 | 식 | 현재 매니페스트 범위 |
+| 스탯 | 기본 식 | 추가 보정 |
 | --- | --- | --- |
-| `atk` | `round(card.attack × 0.7 × rarityScale)` | 13~152 |
-| `def` | `round(card.defense × 0.7 × rarityScale)` | 등급별 정규화 |
-| `maxHp` | `round((40 + round(defense × 0.62)) × rarityScale)` | 69~204 |
-| `spd` | `10 + floor(luck ÷ 4)` | 20~35 |
-| `crit` | `5 + floor(luck ÷ 10)` (퍼센트) | 9~15 |
-| `cost` | 등급별 코스트 표 | 2~6 |
+| `atk` | `round(card.attack × 0.7 × rarityScale)` | 포지션·성장 보정 |
+| `def` | `round(card.defense × 0.7 × rarityScale)` | 포지션·성장 보정 |
+| `maxHp` | `round((40 + round(defense × 0.62)) × rarityScale)` | 포지션·성장 보정 |
+| `spd` | `10 + floor(luck ÷ 4)` | 지원 포지션 속도 보정 |
+| `crit` | `5 + floor(luck ÷ 10)` (퍼센트) | 강화에 따라 증가 |
+| `cost` | 등급별 코스트 표 | 2~7 |
 
 `rarityScale`은 등급의 평균 전투력(HP + 2×ATK + DEF)을 정규화 밴드 `180 × POWER_CURVE(rarity, 0)`에
-맞추는 배수입니다(N 1.0, R 1.25, SR 1.55, SSR 2.4, UR 3.55). 카드 개별 역할은 그대로 두고 등급 간
+맞추는 배수입니다(N 1.0, R 1.25, SR 1.5965, SSR 2.544, UR 3.905). 카드 개별 역할은 그대로 두고 등급 간
 평균만 약속된 밴드에 맞춥니다. 스킬 코스트:
 
 | 등급 | 정규화 배수 | 스킬 코스트 |
 | --- | --- | --- |
 | N | 1.0 | 2 |
 | R | 1.25 | 3 |
-| SR | 1.55 | 4 |
-| SSR | 2.4 | 5 |
-| UR | 3.55 | 6 |
+| SR | 1.5965 | 4 |
+| SSR | 2.544 | 5 |
+| UR | 3.905 | 6 |
+| XR | UR 대비 1.35배 | 7 |
 
 같은 카드 중복은 강화에 소모합니다. `lib/enhance.ts`의 `MAX_ENHANCE`는 15이고 `enhanceCost(level)`은
-레벨이 오를수록 1장씩 더 듭니다(0→1은 1장, 1→2는 2장, …). 기본 카드 1장은 항상 남겨 두고 나머지만
-재료가 되므로 화면에 보이는 재료 수는 `enhanceMaterials(quantity) = max(0, quantity - 1)`이고, 저장되는
-`inventory.quantity`는 기본 카드를 포함한 전체 합계입니다. 강화 배수는 등급별 `enhancePower(rarity, level)`
+레벨이 오를수록 1장씩 더 듭니다(0→1은 1장, 1→2는 2장, …). 각 보유행의 기본 카드 1장은 항상 남겨 두며, 같은 원본 카드의 모든 보유행에서
+`enhanceMaterials(quantity) = max(0, quantity - 1)`을 합산한 공유 재료 수를 사용합니다.
+`inventory.quantity`는 해당 보유행의 본체를 포함한 수량이고 `materialCount`는 사용 가능한 공유 강화 재료입니다. 강화 배수는 등급별 `enhancePower(rarity, level)`
 곡선의 비율이며, 이 곡선은 N5≈R3≈SR0, N10≈R5≈SR2≈SSR0, N15≈R10≈SR6≈SSR3≈UR0 지점을 근사합니다
-(±15%). 모든 호출자는 `applyEnhance(stats, level, rarity)`를 등급과 함께 씁니다. 전투 시작 때 강화
+(기존 밴드이며 현재 고등급 상향과 포지션 보정에 따라 차이가 있습니다). 모든 호출자는 `applyEnhance(stats, level, rarity)`를 등급과 함께 씁니다. 전투 시작 때 강화
 단계를 덱 스냅샷에 고정합니다.
 
-속성은 `visualTags`를 아래 표 순서(light → shadow → iron → nature → spark)로 훑어 처음 맞는
-키워드로 정하고, 아무것도 맞지 않으면 `ELEMENTS[version % 5]`로 떨어집니다.
-
-| 속성 | 키워드 |
-| --- | --- |
-| light | snow, glare, christmas-tree, thumb-up, peace-sign, bouquet, formalwear |
-| shadow | dark-background, eyes-closed, back-view, side-profile, low-quality, low-resolution, mask, negative-space, motion-blur, soft-focus |
-| iron | glasses, goggles, helmet, winter-gear, winter-jacket, uniform, striped-suit, vehicle, subway, transit, sign, billboard, backpack, papers |
-| nature | waterpark, wet-hair, waterline, food, spoon, chopsticks, restaurant, crowd, street, rain-overlay |
-| spark | distorted-filter, screenshot, screenshot-overlay, animated, gif, mirror-selfie, phone, phone-foreground, cat-filter, filter, recursive-face, circular-crop, collage, layered-composition, countdown-overlay, chat-overlay, low-angle |
+속성은 대지·물·불·풀·암흑으로 구분하며 태그와 카드 버전으로 안정적으로 결정합니다.
+포지션은 기존 스킬의 회복·보호·공격·지원 동작에 따라 결정합니다. 상성 및 시간 제한이 있는
+속성 연계와 특성 강화 효과는 공통 전투 엔진에서 계산하고 이벤트 로그로 화면에 전달합니다.
+유효 등급과 특성을 포함한 보유 카드의 성장 상태를 전투 시작 시 저장하므로, 전투 이후의 분해나 강화가 재생 결과를 바꾸지 않습니다.
 
 ## 능력 DSL
 
-`lib/battle/abilities.ts`(`ABILITY_RULESET` 1)가 카드에서 서명 스킬 하나를 만듭니다. 능력은
+`lib/battle/abilities.ts`가 카드에서 서명 스킬 하나를 만듭니다. 능력은
 JavaScript 콜백이 아니라 데이터입니다: `{ id, name, description, cost, cooldown, ops }`.
 
 - `id`는 `ability:<cardId>@<ABILITY_RULESET>`이고 `name`·`description`은 카드의 `skillName`·`skillDescription`을 그대로 씁니다.
@@ -77,8 +72,8 @@ target 종류: `enemy_active`, `enemy_lowest_hp`, `enemy_all`, `self`, `ally_low
 `apply_status.turns` 0~10, `chance` 0~100, `damage.hits` 정수 1~8. 엔진은 못 믿는 입력을 만나면
 경고를 남기고 기본 공격으로 떨어집니다.
 
-등급별 기본 템플릿(속성 rider가 붙습니다 — light는 아군 공격 강화, shadow는 공격 약화, iron은 방어
-약화, nature는 중독, spark는 35% 기절):
+등급별 기본 템플릿(속성 rider가 붙습니다 — 불은 아군 공격 강화, 물은 공격 약화, 대지는 방어
+약화, 풀은 중독, 암흑은 35% 기절):
 
 | 등급 | 기본 구성 |
 | --- | --- |
@@ -195,19 +190,17 @@ final       = max(1, round(base × variance × element × crit))
 
 ## 난이도 모드와 뽑기권
 
-`lib/battle/opponents.ts`가 모드를 정의합니다: `normal`(일반), `hard`(하드), `chaos`(카오스). 일반 상대
-5개를 모두 첫 격파하면 하드가, 하드 5개를 모두 첫 격파하면 카오스가 열립니다. 잠금은 서버가
-`reward_claims`의 claim key(`pve_first:<상대>`, `pve_first:hard:<상대>`, …)로 강제하며, 클라이언트의
-모드 선택은 힌트일 뿐입니다. 모드별 첫 격파 보상은 1x/2x/4x이고, 일반 모드부터 기본 스탯과 AI가 상향되어
-단순 저등급 덱의 무조건 승리가 방지되며, 하드·카오스는 체력(HP)뿐만 아니라 공격력·방어력(ATK/DEF)과 AI 성향이
-점진적으로 강화되어 실질적인 위협을 형성합니다. 데일리 챌린지는 별도의 일반 모드입니다. `BATTLE_RULESET_VERSION`이 4로 올라가
-이전 버전의 미정산 전투는 `invalid`로 확정됩니다.
+일반 상대 5개를 모두 격파하면 하드, 하드 5개를 모두 격파하면 카오스가 열립니다.
+모드별 첫 격파 기록은 독립적으로 저장하며, 서버가 잠금을 검사합니다. 데일리는 별도의 일반 모드입니다.
+전투 규칙 버전은 5이며 이전 버전 전투는 변경된 규칙으로 재판정하지 않습니다.
 
-뽑기는 `normal`(뽑기권)·`sr`(SR 이상 뽑기권)·`ssr`(SSR 이상 뽑기권) 세 종류이며 잔액이 분리됩니다.
-1/5/10 연속을 지원하고, 하루 한 번의 무료 뽑기는 일반 단일 뽑기에만 적용됩니다. 보장 뽑기권은 최소
-등급을 보장하며 일반 천장(pity) 카운터를 건드리지 않습니다. 일반 천장은 30회부터 SSR+ 확률이 점점
-오르고 60회째 뽑기를 UR 22%·SSR 78%로 확정하며, 화면 확률표도 이 확정 수치를 그대로 보여줍니다.
-승리하면 모드별 확률로 뽑기권이
-떨어지고(일반 SR 10%·SSR 2%, 하드 20%·5%, 카오스 30%·10%), 이 드랍은 정산 시 서버 암호학적 난수로 추첨 및 단일 트랜잭션으로 확정 지급·영구 캐시되어 시드 쇼핑이 불가능합니다. 데일리는 하루 한 번의 첫 정산에서만 드랍합니다. 쿠폰은
-`LIMKETMON`(뽑기권 100), `LIMKETMON_SR_100P`(SR 이상 20), `LIMKETMON_SSR_100P`(SSR 이상 20)이며
-대소문자를 가리지 않고 1인 1회입니다.
+하급·보통·SR 이상·SSR 이상 뽑기권의 잔액은 분리되며 1/5/10장 뽑기를 지원합니다.
+하루 무료 1장은 보통 단일 뽑기에만 적용됩니다. 보장권의 확률은 최소 등급 이상에서 기본 가중치를 정규화하며,
+뽑은 횟수로 확률을 높이거나 특정 등급을 지급하지 않습니다.
+
+매 PvE 승리는 모드와 상대 난이도에 맞는 뽑기권을 확정 지급하며, 최초 격파는 같은 보상을 한 번 더 지급합니다.
+동일 전투의 재정산과 동시 정산은 한 번만 지급합니다. 구체적인 15개 구간의 수량과 종류는 [카드 성장 규칙](CARD_GROWTH.md)을 참조합니다.
+
+공개 쿠폰 `LIMKETMON`은 SSR 이상 1장·보통 10장·하급 50장,
+`LIMKETMON_SR_100P`는 SR 이상 20장, `LIMKETMON_SSR_100P`는 SSR 이상 20장을 지급합니다.
+대소문자를 가리지 않고 계정당 한 번 사용할 수 있습니다.

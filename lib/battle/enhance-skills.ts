@@ -12,7 +12,7 @@
 // already understand it. All skills of one card spend the SAME energy pool and share the one
 // combatant cooldown counter: cooldown is set from whichever skill was chosen last.
 import rawIdeas from '../data/enhance-skills.json';
-import { clampEnhance } from '../enhance.ts';
+import { clampEnhance, enhancePower } from '../enhance.ts';
 import type { Card } from '../cards.ts';
 import type { Rarity } from '../rules.ts';
 import { RARITY_COST, enhanceScale } from './stats.ts';
@@ -234,14 +234,19 @@ export function enhanceSkillId(cardId: string, level: EnhanceSkillLevel): string
   return `skill:${cardId}:${level}`;
 }
 
+function catalogId(card: Card): string {
+  return card.baseCardId ?? card.id;
+}
+
 /** Every unlockable skill of a card, in level order, derived from its enhanced stats. */
 export function enhanceSkillsForCard(card: Card, stats: CardBattleStats): EnhanceSkill[] {
-  return skillIdeasFor(card.id).map((idea) => ({
-    cardId: card.id,
+  const id = catalogId(card);
+  return skillIdeasFor(id).map((idea) => ({
+    cardId: id,
     level: idea.level,
     flavor: idea.description,
     ability: {
-      id: enhanceSkillId(card.id, idea.level),
+      id: enhanceSkillId(id, idea.level),
       name: idea.name,
       description: idea.description,
       cost: enhanceSkillCost(card.rarity, idea.level),
@@ -263,8 +268,8 @@ export function unlockedEnhanceSkills(card: Card, stats: CardBattleStats, enhanc
 // the combatant's own stats. Percentages, chances, turn counts and energy stay untouched.
 // ---------------------------------------------------------------------------
 
-export function scaleAbility(ability: Ability, rarity: Rarity, enhanceLevel: number): Ability {
-  const scale = enhanceScale(rarity, enhanceLevel);
+export function scaleAbility(ability: Ability, rarity: Rarity, enhanceLevel: number, baseRarity: Rarity = rarity): Ability {
+  const scale = enhanceScale(baseRarity, 0) * enhancePower(rarity, enhanceLevel) / enhancePower(baseRarity, 0);
   if (scale === 1) return ability;
   return { ...ability, ops: scaleOps(ability.ops, scale) };
 }

@@ -1,19 +1,26 @@
 // Duplicate-card enhance. Pure data: cost, clamp, stat mul. Server writes; clients only display.
-import type { Rarity } from './rules.ts';
+import { RARITY_ORDER, type Rarity } from './rules.ts';
+import { parseTraits, type CardProgress } from './progression.ts';
 
 export const MAX_ENHANCE = 15;
 
 /**
  * Normalized power band per rarity. The curves are tuned so equal landmarks line up:
- * N5=R3=SR0, N10=R5=SR2=SSR0, N15=R10=SR6=SSR3=UR0. They are abstract units, not raw stats:
+ * N5~R3~SR0, N10~R5~SR2~SSR0, N15~R10~SR6~SSR3~UR0. They are abstract units, not raw stats:
  * battleStats anchors each rarity to its level-0 band and applyEnhance scales by the ratio.
+ *
+ * The level-0 bands carry the card self-buff of the high rarities (SR +3%, SSR +6%, UR +10%), so a
+ * native high-rarity card sits just above its landmark. XR is transcend-only and has no catalog
+ * band of its own: it is exactly UR * 1.35. Nothing downstream re-applies these percentages, they
+ * are read back through enhancePower().
  */
 const POWER_CURVE: Record<Rarity, (level: number) => number> = {
   N: (level) => 1 + 0.08 * level + 0.006 * level * level,
   R: (level) => 1.25 + 0.1 * level + 0.013 * level * level,
-  SR: (level) => 1.55 + 0.3 * level + 0.006 * level * level,
-  SSR: (level) => 2.4 + 0.32 * level + 0.022 * level * level,
-  UR: (level) => 3.55 + 0.4 * level + 0.025 * level * level
+  SR: (level) => 1.55 * 1.03 + 0.3 * level + 0.006 * level * level,
+  SSR: (level) => 2.4 * 1.06 + 0.32 * level + 0.022 * level * level,
+  UR: (level) => 3.55 * 1.1 + 0.4 * level + 0.025 * level * level,
+  XR: (level) => 1.35 * (3.55 * 1.1 + 0.4 * level + 0.025 * level * level)
 };
 
 /** Normalized power of a rarity at an enhancement level. Strictly increasing in `level`. */
@@ -65,6 +72,7 @@ export function applyEnhance<T extends { maxHp: number; atk: number; def: number
 export interface DeckSlot {
   id: string;
   enhance: number;
+  progress?: CardProgress;
 }
 
 /** Old battles stored string ids; new ones store {id, lv}. Missing level is 0. */
@@ -85,9 +93,24 @@ export function parseDeckSlots(raw: unknown): DeckSlot[] {
       continue;
     }
     if (!item || typeof item !== 'object') continue;
-    const row = item as { id?: unknown; lv?: unknown; enhance?: unknown };
+    const row = item as { id?: unknown; lv?: unknown; enhance?: unknown; progress?: unknown };
     if (typeof row.id !== 'string' || !row.id) continue;
-    slots.push({ id: row.id, enhance: clampEnhance(Number(row.lv ?? row.enhance ?? 0)) });
+    const slot: DeckSlot = { id: row.id, enhance: clampEnhance(Number(row.lv ?? row.enhance ?? 0)) };
+    if (row.progress !== undefined) {
+      if (!row.progress || typeof row.progress !== 'object') return [];
+      const p = row.progress as CardProgress;
+      if (typeof p.baseCardId !== 'string' || !p.baseCardId || !RARITY_ORDER.includes(p.rarity)
+        || !Number.isInteger(p.enhanceLevel) || p.enhanceLevel < 0 || p.enhanceLevel > MAX_ENHANCE
+        || !Array.isArray(p.traits)) return [];
+      const traits = parseTraits(JSON.stringify(p.traits));
+      if (traits.length !== p.traits.length || traits.some((trait, index) => {
+        const original = p.traits[index];
+        return !original || trait.id !== original.id || trait.level !== original.level || trait.transcended !== original.transcended;
+      })) return [];
+      slot.progress = { baseCardId: p.baseCardId, rarity: p.rarity, enhanceLevel: p.enhanceLevel, traits };
+      slot.enhance = p.enhanceLevel;
+    }
+    slots.push(slot);
   }
   return slots;
 }

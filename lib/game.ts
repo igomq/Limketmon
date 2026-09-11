@@ -1,15 +1,17 @@
 import 'server-only';
+import { env } from 'cloudflare:workers';
 import { getDatabase } from '../db/index';
 import manifest from './data/cards.curated.json';
 import type { Card } from './cards';
-import { isHardPity, kstDate, nextPityCounter, RARITY_ORDER, rollGuaranteedRarity, rollRarityWithPity, untilHardPity, type Rarity } from './rules';
+import { effectiveCard, parseTraits, type CardProgress, type Trait } from './progression';
+import { kstDate, RARITY_ORDER, rollGuaranteedRarity, rollRarity, type Rarity } from './rules';
 import { InsufficientTickets, savePull, type TicketType } from './pull';
 import { DECK_SIZE, MAX_DECKS, normalizeDeckName, validateDeck } from './decks';
 import { dailyChallenge, dailyClaimKey, type DailyChallenge } from './daily';
 import { ACHIEVEMENTS, achievementById, achievementClaimKey, evaluateAchievements, type AchievementProgress } from './achievements';
-import { planBattleRewards, pveFirstClearClaimKey, rollTicketDrop, ticketDropClaimKey } from './rewards';
+import { planBattleRewards, pveFirstClearClaimKey, victoryTicketReward } from './rewards';
 import { summarizeBattles, type BattleRow } from './stats';
-import { CATALOG, buildSetup, CARD_BY_ID } from './battle/setup';
+import { buildSetup, CARD_BY_ID } from './battle/setup';
 import { battleStats } from './battle/stats';
 import { applyEnhance, clampEnhance, enhanceCost, enhanceMaterials, MAX_ENHANCE, parseDeckSlots } from './enhance';
 import { BATTLE_MODES, BATTLE_RULESET_VERSION, type BattleEvent, type BattleMode, type BattleModifier, type BattleState, type Decision } from './battle/types';
@@ -24,11 +26,9 @@ export interface Snapshot {
   freeAvailable: boolean;
   credits: number;
   completion: number;
-  inventory: Array<{ cardId: string; quantity: number; firstObtainedAt: string; enhanceLevel: number }>;
-  /** Pulls remaining before the hard pity guarantee. */
-  pityRemaining: number;
-  /** Guaranteed-pull ticket balances. Kept apart from the normal credit pool. */
-  tickets: { sr: number; ssr: number };
+  inventory: Array<{ cardId: string; quantity: number; materialCount: number; firstObtainedAt: string; enhanceLevel: number; baseCardId: string; rarity: Rarity; traits: Trait[]; card: Card }>;
+  tickets: { low: number; sr: number; ssr: number };
+  materials: { proof: number; fragments: number; twinProof: number };
   /** Battle modes the account has unlocked. 'normal' is always present. */
   unlockedModes: BattleMode[];
   /** Opponent ids first-cleared per mode; the UI shows progress and completion from this. */
@@ -76,8 +76,8 @@ export function emptySnapshot(now = new Date()): Snapshot {
     credits: 0,
     completion: 0,
     inventory: [],
-    pityRemaining: untilHardPity(0),
-    tickets: { sr: 0, ssr: 0 },
+    tickets: { low: 0, sr: 0, ssr: 0 },
+    materials: { proof: 0, fragments: 0, twinProof: 0 },
     unlockedModes: ['normal'],
     clearedByMode: { normal: [], hard: [], chaos: [] },
     decks: [],
@@ -142,9 +142,9 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
   // table grew with every settled battle (settle:<id> and ticket_drop:<id> rows).
   const claimKeys = progressClaimKeys(date);
   const [stateResult, inventoryResult, deckResult, claimResult, battleResult, achievementResult, pullResult] = await db.batch([
-    db.prepare('SELECT pull_credits, last_free_pull_date, pity_counter, sr_tickets, ssr_tickets FROM user_game_state WHERE user_id = ?').bind(userId),
+    db.prepare('SELECT pull_credits, last_free_pull_date, low_tickets, proof, fragments, twin_proof, sr_tickets, ssr_tickets FROM user_game_state WHERE user_id = ?').bind(userId),
     db.prepare(`
-      SELECT card_id, quantity, first_obtained_at, enhance_level
+      SELECT card_id, quantity, first_obtained_at, enhance_level, base_card_id, rarity_override, traits
       FROM inventory WHERE user_id = ? ORDER BY card_id
     `).bind(userId),
     db.prepare(`
@@ -154,7 +154,7 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     `).bind(userId),
     db.prepare(`SELECT claim_key FROM reward_claims WHERE user_id = ? AND claim_key IN (${claimKeys.map(() => '?').join(', ')})`).bind(userId, ...claimKeys),
     db.prepare(`
-      SELECT id, result, kind, opponent_id, kst_date, created_at, deck_cards, mvp_card_id, damage_dealt
+      SELECT id, result, kind, opponent_id, kst_date, created_at, deck_cards, mvp_card_id, damage_dealt, rounds, clutch
       FROM battles WHERE user_id = ? AND result != 'pending'
       ORDER BY created_at DESC LIMIT 200
     `).bind(userId),
@@ -162,16 +162,15 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     db.prepare('SELECT rarity, COUNT(*) AS total FROM pull_history WHERE user_id = ? GROUP BY rarity').bind(userId)
   ]);
   const state = stateResult.results[0] as
-    | { pull_credits: number; last_free_pull_date: string | null; pity_counter: number; sr_tickets: number; ssr_tickets: number }
+    | { pull_credits: number; last_free_pull_date: string | null; low_tickets: number; proof: number; fragments: number; twin_proof: number; sr_tickets: number; ssr_tickets: number }
     | undefined;
-  const inventory = inventoryResult.results as Array<{
-    card_id: string;
-    quantity: number;
-    first_obtained_at: string;
-    enhance_level: number;
-  }>;
-  const owned = inventory.length;
-  const pityCounter = Number(state?.pity_counter ?? 0);
+  const inventory = inventoryResult.results as unknown as OwnedRow[];
+  const materialPools = new Map<string, number>();
+  for (const row of inventory) {
+    const baseId = row.base_card_id ?? row.card_id;
+    materialPools.set(baseId, (materialPools.get(baseId) ?? 0) + enhanceMaterials(row.quantity));
+  }
+  const owned = new Set(inventory.map((row) => row.base_card_id ?? row.card_id)).size;
   const claims = new Set((claimResult.results as Array<{ claim_key: string }>).map((row) => row.claim_key));
   const unlocked = new Map(
     (achievementResult.results as Array<{ achievement_id: string; unlocked_at: string }>).map((row) => [
@@ -187,9 +186,17 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
   }
   const rarityById: Record<string, string> = {};
   for (const card of cards) rarityById[card.id] = card.rarity;
+  for (const row of inventory) rarityById[row.card_id] = progressOf(row).rarity;
+  const rarityUsage: Record<string, number> = {};
+  for (const battle of battleResult.results as Array<{ deck_cards: string }>) {
+    for (const slot of parseDeckSlots(battle.deck_cards)) {
+      const rarity = slot.progress?.rarity ?? rarityById[slot.id];
+      if (rarity) rarityUsage[rarity] = (rarityUsage[rarity] ?? 0) + 1;
+    }
+  }
   const decks = toDecks(deckResult.results);
   const starter = decks.length === 0 && owned >= DECK_SIZE;
-  if (starter) await createStarterDeck(userId, inventory.map((row) => row.card_id));
+  if (starter) await createStarterDeck(userId, inventory);
   const rows: BattleRow[] = (battleResult.results as Array<Record<string, unknown>>).map((row) => ({
     result: String(row.result),
     kind: String(row.kind),
@@ -227,8 +234,8 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     freeAvailable: state?.last_free_pull_date !== kstDate(now),
     credits: state?.pull_credits ?? 0,
     completion: Math.round((owned / cards.length) * 100),
-    pityRemaining: untilHardPity(pityCounter),
-    tickets: { sr: Number(state?.sr_tickets ?? 0), ssr: Number(state?.ssr_tickets ?? 0) },
+    materials: { proof: Number(state?.proof ?? 0), fragments: Number(state?.fragments ?? 0), twinProof: Number(state?.twin_proof ?? 0) },
+    tickets: { low: Number(state?.low_tickets ?? 0), sr: Number(state?.sr_tickets ?? 0), ssr: Number(state?.ssr_tickets ?? 0) },
     unlockedModes,
     clearedByMode,
     decks: starter ? await listDecks(userId) : decks,
@@ -245,6 +252,7 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     })),
     stats: {
       ...base,
+      rarityUsage,
       battles: counters.battles,
       wins: counters.wins,
       losses: counters.losses,
@@ -265,8 +273,10 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     inventory: inventory.map((item) => ({
       cardId: item.card_id,
       quantity: item.quantity,
+      materialCount: materialPools.get(item.base_card_id ?? item.card_id) ?? 0,
       firstObtainedAt: item.first_obtained_at,
-      enhanceLevel: clampEnhance(Number(item.enhance_level ?? 0))
+      ...progressOf(item),
+      card: ownedCard(item)
     }))
   };
 }
@@ -298,50 +308,27 @@ export async function pullCards(userId: string, count: 1 | 5 | 10 = 1, ticketTyp
 }> {
   const db = getDatabase();
   const now = new Date();
-  const isNormal = ticketType === 'normal';
-  // The roll depends on the pity counter, and the pull transaction accepts the draw only if the
-  // counter it read is still current. A request that loses that race is refused and retries, so
-  // parallel pulls can never each collect the same hard-pity guarantee.
-  for (let attempt = 0; ; attempt++) {
-    let counter = 0;
-    if (isNormal) {
-      const state = (await db
-        .prepare('SELECT pity_counter FROM user_game_state WHERE user_id = ?')
-        .bind(userId)
-        .first()) as { pity_counter: number } | null;
-      counter = Number(state?.pity_counter ?? 0);
+  const drawn = Array.from({ length: count }, () => {
+    const unit = randomUnit();
+    const rarity = ticketType === 'low'
+      ? (unit < 0.78 ? 'N' : unit < 0.98 ? 'R' : unit < 0.999 ? 'SR' : 'SSR')
+      : ticketType === 'normal' ? rollRarity(unit) : rollGuaranteedRarity(unit, ticketType === 'ssr' ? 'SSR' : 'SR');
+    return pickCard(rarity);
+  });
+  try {
+    const results = await savePull(db, userId, drawn, now, 0, 0, ticketType);
+    return { results, snapshot: await getSnapshot(userId, now) };
+  } catch (error) {
+    if (error instanceof InsufficientTickets) throw new GameError('not_enough_tickets', ticketMessage(ticketType, count));
+    if (error instanceof Error && /chk_user_game_state_credits/.test(error.message)) {
+      throw new GameError('not_enough_credits', '뽑기권이 부족해요.');
     }
-    const fromPity = counter;
-    const drawn: Card[] = [];
-    for (let index = 0; index < count; index++) {
-      // Guaranteed-ticket pulls never consult the normal pity ladder; they only floor the rarity.
-      const rarity = isNormal
-        ? rollRarityWithPity(randomUnit(), counter)
-        : rollGuaranteedRarity(randomUnit(), ticketType === 'ssr' ? 'SSR' : 'SR');
-      drawn.push(pickCard(rarity));
-      if (isNormal) counter = nextPityCounter(counter, rarity);
-    }
-    try {
-      const results = await savePull(db, userId, drawn, now, fromPity, counter, ticketType);
-      return { results, snapshot: await getSnapshot(userId, now) };
-    } catch (error) {
-      if (error instanceof InsufficientTickets) {
-        throw new GameError('not_enough_tickets', ticketMessage(ticketType, count));
-      }
-      if (error instanceof Error && /chk_user_game_state_credits/.test(error.message)) {
-        throw new GameError('not_enough_credits', count === 1
-          ? '오늘의 무료 뽑기를 사용했고, 뽑기권이 부족해요.'
-          : `${count}장 뽑기에는 뽑기권 ${count}장이 필요해요.`);
-      }
-      // Another pull moved the counter first; redraw against the value it committed.
-      if (error instanceof Error && /pity_changed/.test(error.message) && attempt < 12) continue;
-      throw error;
-    }
+    throw error;
   }
 }
 
 function ticketMessage(ticketType: TicketType, count: number): string {
-  const label = ticketType === 'ssr' ? 'SSR 이상 뽑기권' : 'SR 이상 뽑기권';
+  const label = ticketType === 'low' ? '하급 뽑기권' : ticketType === 'normal' ? '보통 뽑기권' : ticketType === 'ssr' ? 'SSR 이상 뽑기권' : 'SR 이상 뽑기권';
   return count === 1
     ? `${label}이 필요해요.`
     : `${count}장 뽑기에는 ${label} ${count}장이 필요해요.`;
@@ -349,6 +336,7 @@ function ticketMessage(ticketType: TicketType, count: number): string {
 
 
 interface CouponGrant {
+  low: number;
   credits: number;
   sr: number;
   ssr: number;
@@ -356,21 +344,33 @@ interface CouponGrant {
 
 /** Case-insensitive once-per-user coupons. The 100-p coupons grant 20 guaranteed tickets each. */
 const COUPONS: Record<string, CouponGrant> = {
-  LIMKETMON: { credits: 100, sr: 0, ssr: 0 },
-  LIMKETMON_SR_100P: { credits: 0, sr: 20, ssr: 0 },
-  LIMKETMON_SSR_100P: { credits: 0, sr: 0, ssr: 20 }
+  LIMKETMON: { credits: 10, low: 50, sr: 0, ssr: 1 },
+  LIMKETMON_SR_100P: { credits: 0, low: 0, sr: 20, ssr: 0 },
+  LIMKETMON_SSR_100P: { credits: 0, low: 0, sr: 0, ssr: 20 }
 };
+
+/**
+ * Server-only secret coupon: repeatable, grants every catalog card x100, keeps existing enhancement,
+ * writes no redemption row so it stays usable. The code itself lives only in the PRIVATE_CARD_COUPON
+ * runtime secret (never in source, tests or docs). Absent or blank secret disables this route, so
+ * ordinary public coupons keep working unchanged.
+ */
+function privateCouponCode(): string {
+  return (env.PRIVATE_CARD_COUPON ?? '').trim().toUpperCase();
+}
 
 export async function redeemCoupon(userId: string, rawCode: string): Promise<{ snapshot: Snapshot; granted: CouponGrant }> {
   const code = rawCode.trim().toUpperCase();
+  const db = getDatabase();
+  const secret = privateCouponCode();
+  if (secret && code === secret) {
+    await db.batch(cards.map((card) => db.prepare(`INSERT INTO inventory (user_id, card_id, quantity, first_obtained_at)
+      VALUES (?, ?, 100, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 100`)
+      .bind(userId, card.id, new Date().toISOString())));
+    return { snapshot: await getSnapshot(userId), granted: { credits: 0, low: 0, sr: 0, ssr: 0 } };
+  }
   const grant = COUPONS[code];
   if (!grant) throw new GameError('invalid_code', '유효하지 않은 쿠폰 코드입니다.');
-
-  const db = getDatabase();
-  const before = (await db
-    .prepare('SELECT pull_credits, sr_tickets, ssr_tickets FROM user_game_state WHERE user_id = ?')
-    .bind(userId)
-    .first()) as { pull_credits: number; sr_tickets: number; ssr_tickets: number } | null;
   try {
     await db.batch([
       db.prepare(`
@@ -380,10 +380,11 @@ export async function redeemCoupon(userId: string, rawCode: string): Promise<{ s
       db.prepare(`
         UPDATE user_game_state SET
           pull_credits = pull_credits + ?,
+          low_tickets = low_tickets + ?,
           sr_tickets = sr_tickets + ?,
           ssr_tickets = ssr_tickets + ?
         WHERE user_id = ?
-      `).bind(grant.credits, grant.sr, grant.ssr, userId)
+      `).bind(grant.credits, grant.low, grant.sr, grant.ssr, userId)
     ]);
   } catch (error) {
     const redeemed = await db.prepare(`
@@ -393,43 +394,48 @@ export async function redeemCoupon(userId: string, rawCode: string): Promise<{ s
     throw error;
   }
 
-  const after = (await db
-    .prepare('SELECT pull_credits, sr_tickets, ssr_tickets FROM user_game_state WHERE user_id = ?')
-    .bind(userId)
-    .first()) as { pull_credits: number; sr_tickets: number; ssr_tickets: number } | null;
-  // Report what the row actually gained, never a hardcoded constant.
-  return {
-    snapshot: await getSnapshot(userId),
-    granted: {
-      credits: Number(after?.pull_credits ?? 0) - Number(before?.pull_credits ?? 0),
-      sr: Number(after?.sr_tickets ?? 0) - Number(before?.sr_tickets ?? 0),
-      ssr: Number(after?.ssr_tickets ?? 0) - Number(before?.ssr_tickets ?? 0)
-    }
-  };
+  // These exact increments committed behind the coupon uniqueness gate.
+  return { snapshot: await getSnapshot(userId), granted: { ...grant } };
 }
 
 export async function enhanceCard(userId: string, rawCardId: unknown): Promise<Snapshot> {
-  if (typeof rawCardId !== 'string' || !CARD_BY_ID.has(rawCardId)) {
+  if (typeof rawCardId !== 'string' || !rawCardId || rawCardId.length > 128) {
     throw new GameError('invalid_card', '카드를 찾을 수 없습니다.');
   }
   const db = getDatabase();
-  const sql = 'UPDATE inventory SET quantity = quantity - ?, enhance_level = enhance_level + 1 WHERE user_id = ? AND card_id = ? AND enhance_level = ? AND quantity = ? AND enhance_level < ? AND quantity - ? >= 1';
   for (let attempt = 0; attempt < 8; attempt++) {
-    const row = (await db
-      .prepare('SELECT quantity, enhance_level FROM inventory WHERE user_id = ? AND card_id = ?')
-      .bind(userId, rawCardId)
-      .first()) as { quantity: number; enhance_level: number } | null;
+    const rows = await ownedRows(userId);
+    const row = rows.find((entry) => entry.card_id === rawCardId);
     if (!row) throw new GameError('not_owned', '아직 없는 카드예요.');
-    const level = clampEnhance(Number(row.enhance_level ?? 0));
-    const quantity = Number(row.quantity);
+    const progress = progressOf(row);
+    const level = progress.enhanceLevel;
     if (level >= MAX_ENHANCE) throw new GameError('max_enhance', '이미 최대 강화예요.');
+    const pool = rows.filter((entry) => (entry.base_card_id ?? entry.card_id) === progress.baseCardId)
+      .sort((a, b) => a.card_id.localeCompare(b.card_id));
     const cost = enhanceCost(level);
-    if (quantity - cost < 1) {
-      const deficit = cost - enhanceMaterials(quantity);
-      throw new GameError('not_enough_copies', '강화 재료가 ' + String(deficit) + '장 부족해요. 같은 카드 한 장은 남겨 둡니다.');
+    const available = pool.reduce((sum, entry) => sum + enhanceMaterials(entry.quantity), 0);
+    if (available < cost) {
+      throw new GameError('not_enough_copies', `강화 재료가 ${cost - available}장 부족해요. 각 보유 카드 한 장은 남겨 둡니다.`);
     }
-    const updated = await db.prepare(sql).bind(cost, userId, rawCardId, level, quantity, MAX_ENHANCE, cost).run();
-    if (Number((updated.meta as { changes?: number }).changes ?? 0)) return getSnapshot(userId);
+    const writes: D1PreparedStatement[] = [ownedRowGuard(db, userId, row),
+      db.prepare('UPDATE inventory SET enhance_level = enhance_level + 1 WHERE user_id = ? AND card_id = ?').bind(userId, rawCardId)];
+    let remaining = cost;
+    for (const donor of pool) {
+      const quantity = Math.min(remaining, enhanceMaterials(donor.quantity));
+      if (!quantity) continue;
+      // The target was already guarded before its level increment. Later donor conflicts
+      // abort this entire batch, including the increment and every preceding deduction.
+      if (donor.card_id !== rawCardId) writes.push(ownedRowGuard(db, userId, donor));
+      writes.push(db.prepare('UPDATE inventory SET quantity = quantity - ? WHERE user_id = ? AND card_id = ?').bind(quantity, userId, donor.card_id));
+      remaining -= quantity;
+      if (!remaining) break;
+    }
+    try { await db.batch(writes); }
+    catch (error) {
+      if (error instanceof Error && /chk_user_game_state_credits/.test(error.message)) continue;
+      throw error;
+    }
+    return getSnapshot(userId);
   }
   throw new GameError('enhance_busy', '다른 강화가 먼저 처리됐어요. 다시 시도해주세요.');
 }
@@ -489,9 +495,9 @@ export async function listDecks(userId: string): Promise<DeckSummary[]> {
 }
 
 /** The first deck is free and becomes the default, so a new collector can play immediately. */
-async function createStarterDeck(userId: string, ownedCardIds: string[]): Promise<void> {
+async function createStarterDeck(userId: string, rows: OwnedRow[]): Promise<void> {
   const db = getDatabase();
-  const pool = ownedCardIds.map((id) => CARD_BY_ID.get(id)).filter((card): card is Card => Boolean(card));
+  const pool = [...new Map(rows.map((row) => [progressOf(row).baseCardId, ownedCard(row)])).values()];
   if (pool.length < DECK_SIZE) return;
   const strongest = [...pool]
     .sort((left, right) => rarityRankOf(right.rarity) - rarityRankOf(left.rarity) || left.version - right.version)
@@ -520,8 +526,8 @@ function rarityRankOf(rarity: Rarity): number {
 
 export async function saveDeck(userId: string, deckId: string, rawCardIds: unknown, now = new Date()): Promise<DeckSummary[]> {
   const db = getDatabase();
-  const owned = await ownedCards(userId);
-  const validated = validateDeck(rawCardIds, owned);
+  const owned = await ownedRows(userId);
+  const validated = validateOwnedDeck(rawCardIds, owned);
   if (!validated.ok) throw new GameError('invalid_deck', validated.error);
   const existing = await db.prepare('SELECT id FROM decks WHERE id = ? AND user_id = ?').bind(deckId, userId).first();
   if (!existing) throw new GameError('not_found', '덱을 찾을 수 없습니다.');
@@ -539,8 +545,8 @@ export async function createDeck(userId: string, rawName: unknown, rawCardIds: u
   const db = getDatabase();
   const name = normalizeDeckName(rawName);
   if (!name) throw new GameError('invalid_name', '덱 이름을 입력해주세요.');
-  const owned = await ownedCards(userId);
-  const validated = validateDeck(rawCardIds, owned);
+  const owned = await ownedRows(userId);
+  const validated = validateOwnedDeck(rawCardIds, owned);
   if (!validated.ok) throw new GameError('invalid_deck', validated.error);
   const count = await db.prepare('SELECT COUNT(*) AS total FROM decks WHERE user_id = ?').bind(userId).first();
   if (Number((count as { total: number } | null)?.total ?? 0) >= MAX_DECKS) {
@@ -553,21 +559,15 @@ export async function createDeck(userId: string, rawName: unknown, rawCardIds: u
   // The count above is only a friendly early check; this guarded insert is what actually holds
   // the cap when two requests race, because one statement is atomic. The default flag is decided
   // inside the same statement so parallel creates cannot produce two default decks.
-  const inserted = await db.prepare(`INSERT INTO decks (id, user_id, name, is_default, created_at, updated_at)
-    SELECT ?, ?, ?,
-      (SELECT CASE WHEN EXISTS (SELECT 1 FROM decks WHERE user_id = ? AND is_default = 1) THEN 0 ELSE 1 END),
-      ?, ?
-    WHERE (SELECT COUNT(*) FROM decks WHERE user_id = ?) < ?`)
-    .bind(deckId, userId, name, userId, now, now, userId, MAX_DECKS)
-    .run();
-  if (!Number((inserted.meta as { changes?: number }).changes ?? 0)) {
-    throw new GameError('too_many_decks', `덱은 최대 ${MAX_DECKS}개까지 만들 수 있습니다.`);
-  }
-  await db.batch(
-    validated.cards.map((cardId, slot) =>
+  await db.batch([
+    db.prepare(`INSERT INTO decks (id, user_id, name, is_default, created_at, updated_at)
+      SELECT ?, ?, ?, CASE WHEN EXISTS (SELECT 1 FROM decks WHERE user_id = ? AND is_default = 1) THEN 0 ELSE 1 END, ?, ?
+      WHERE (SELECT COUNT(*) FROM decks WHERE user_id = ?) < ?`)
+      .bind(deckId, userId, name, userId, now, now, userId, MAX_DECKS),
+    ...validated.cards.map((cardId, slot) =>
       db.prepare('INSERT INTO deck_cards (deck_id, slot, card_id) VALUES (?, ?, ?)').bind(deckId, slot, cardId)
     )
-  );
+  ]);
   return listDecks(userId);
 }
 
@@ -628,50 +628,59 @@ export async function setDefaultDeck(userId: string, deckId: string): Promise<De
  */
 export async function autoDeck(userId: string, deckId?: unknown, now = new Date()): Promise<DeckSummary[]> {
   const db = getDatabase();
-  const rows = (await db
-    .prepare('SELECT card_id, enhance_level FROM inventory WHERE user_id = ?')
-    .bind(userId)
-    .all()).results as Array<{ card_id: string; enhance_level: number }>;
-  if (rows.length < DECK_SIZE) {
-    throw new GameError('not_enough_cards', '추천 덱을 만들려면 카드가 ' + String(DECK_SIZE) + '장 필요해요.');
-  }
-  const picked = [...rows]
-    .sort((left, right) =>
-      compareBattlePower(left.card_id, right.card_id, Number(left.enhance_level), Number(right.enhance_level))
-    )
-    .slice(0, DECK_SIZE)
-    .map((row) => row.card_id);
+  const rows = await ownedRows(userId);
+  const power = (row: OwnedRow) => {
+    const card = ownedCard(row);
+    const stats = applyEnhance(battleStats(card), row.enhance_level, card.rarity);
+    return stats.maxHp + stats.atk * 2 + stats.def + stats.spd * 2;
+  };
+  const sorted = rows.sort((a, b) => power(b) - power(a) || a.card_id.localeCompare(b.card_id));
+  const unique = new Map<string, OwnedRow>();
+  for (const row of sorted) if (!unique.has(progressOf(row).baseCardId)) unique.set(progressOf(row).baseCardId, row);
+  const picked = [...unique.values()].slice(0, DECK_SIZE).map((row) => row.card_id);
+  if (picked.length < DECK_SIZE) throw new GameError('not_enough_cards', '서로 다른 종류 카드 3장이 필요해요.');
   if (typeof deckId === 'string' && deckId) return saveDeck(userId, deckId, picked, now);
   return createDeck(userId, '추천 덱', picked);
 }
 
-/** Highest battle value first, then rarity, then catalog order. Ties are never arbitrary. */
-function compareBattlePower(leftId: string, rightId: string, leftLv = 0, rightLv = 0): number {
-  const left = CARD_BY_ID.get(leftId);
-  const right = CARD_BY_ID.get(rightId);
-  if (!left || !right) return leftId.localeCompare(rightId);
-  const power = (card: Card, level: number) => {
-    const stats = applyEnhance(battleStats(card), level, card.rarity);
-    return stats.maxHp + stats.atk * 2 + stats.def + stats.spd * 2;
-  };
-  return power(right, rightLv) - power(left, leftLv) || left.version - right.version;
+export interface OwnedRow {
+  card_id: string; quantity: number; first_obtained_at: string; enhance_level: number;
+  base_card_id: string | null; rarity_override: Rarity | null; traits: string;
+}
+/** The failing CHECK is inside D1's transaction, so stale reads roll back every preceding write. */
+export function progressionGuard(db: D1Database, userId: string, condition: string, bindings: (string | number | null)[]) {
+  return db.prepare(`UPDATE user_game_state SET pull_credits = CASE WHEN (${condition}) THEN pull_credits ELSE -1 END WHERE user_id = ?`)
+    .bind(...bindings, userId);
 }
 
-async function ownedCards(userId: string): Promise<Set<string>> {
-  const db = getDatabase();
-  const result = await db.prepare('SELECT card_id FROM inventory WHERE user_id = ?').bind(userId).all();
-  return new Set((result.results as Array<{ card_id: string }>).map((row) => row.card_id));
+export function ownedRowGuard(db: D1Database, userId: string, row: OwnedRow) {
+  return progressionGuard(db, userId,
+    'EXISTS (SELECT 1 FROM inventory WHERE user_id = ? AND card_id = ? AND quantity = ? AND enhance_level = ? AND traits = ? AND base_card_id IS ? AND rarity_override IS ?)',
+    [userId, row.card_id, row.quantity, row.enhance_level, row.traits, row.base_card_id, row.rarity_override]);
 }
-
-async function enhanceLevelsFor(userId: string): Promise<Map<string, number>> {
-  const db = getDatabase();
-  const result = await db.prepare('SELECT card_id, enhance_level FROM inventory WHERE user_id = ?').bind(userId).all();
-  return new Map(
-    (result.results as Array<{ card_id: string; enhance_level: number }>).map((row) => [
-      row.card_id,
-      clampEnhance(Number(row.enhance_level ?? 0))
-    ])
-  );
+export async function ownedRows(userId: string): Promise<OwnedRow[]> {
+  const result = await getDatabase().prepare('SELECT * FROM inventory WHERE user_id = ?').bind(userId).all();
+  return result.results as unknown as OwnedRow[];
+}
+export function progressOf(row: OwnedRow): CardProgress {
+  const baseCardId = row.base_card_id ?? row.card_id;
+  const base = CARD_BY_ID.get(baseCardId);
+  if (!base) throw new GameError('invalid_card', '카드를 찾을 수 없습니다.');
+  return { baseCardId, rarity: row.rarity_override ?? base.rarity, enhanceLevel: clampEnhance(row.enhance_level), traits: parseTraits(row.traits) };
+}
+function ownedCard(row: OwnedRow): Card {
+  const progress = progressOf(row);
+  return effectiveCard(CARD_BY_ID.get(progress.baseCardId)!, row.card_id, progress.rarity);
+}
+function validateOwnedDeck(raw: unknown, rows: OwnedRow[], options?: { maxRarity?: Rarity }) {
+  const validated = validateDeck(raw, new Set(rows.map((row) => row.card_id)));
+  if (!validated.ok) return validated;
+  const progress = validated.cards.map((id) => progressOf(rows.find((row) => row.card_id === id)!));
+  if (new Set(progress.map((p) => p.baseCardId)).size !== DECK_SIZE) return { ok: false as const, error: '같은 종류 카드를 중복 출전할 수 없습니다.' };
+  if (options?.maxRarity && progress.some((p) => RARITY_ORDER.indexOf(p.rarity) < RARITY_ORDER.indexOf(options.maxRarity!))) {
+    return { ok: false as const, error: '이번 규칙의 등급 제한을 초과합니다.' };
+  }
+  return validated;
 }
 
 // ---------------------------------------------------------------------------
@@ -770,7 +779,7 @@ function setupFromRow(row: BattleRowFull) {
   const opponent = opponentById(row.opponent_id, mode);
   const slots = parseDeckSlots(row.deck_cards);
   const cardIds = slots.map((slot) => slot.id);
-  if (!opponent || cardIds.length !== DECK_SIZE) return null;
+  if (!opponent || cardIds.length !== DECK_SIZE || slots.some((slot) => !slot.progress)) return null;
   return buildSetup({
     kind: row.kind === 'daily' ? 'daily' : 'pve',
     mode,
@@ -779,6 +788,7 @@ function setupFromRow(row: BattleRowFull) {
     seed: Number(row.seed),
     playerCardIds: cardIds,
     playerEnhance: slots.map((slot) => slot.enhance),
+    playerProgress: slots.map((slot) => slot.progress!),
     battleId: row.id
   });
 }
@@ -814,7 +824,7 @@ export async function startBattle(
     .bind(deckRow.id)
     .all()).results as Array<{ card_id: string }>;
   const cardIds = deckCards.map((row) => row.card_id);
-  const owned = await ownedCards(userId);
+  const owned = await ownedRows(userId);
 
   let opponentId: string;
   let modifier: BattleModifier;
@@ -834,7 +844,7 @@ export async function startBattle(
     }
   }
 
-  const validated = validateDeck(
+  const validated = validateOwnedDeck(
     cardIds,
     owned,
     modifier.kind === 'rarity_cap' ? { maxRarity: modifier.max } : undefined
@@ -843,9 +853,11 @@ export async function startBattle(
 
   const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
   const battleId = crypto.randomUUID();
-  const levels = await enhanceLevelsFor(userId);
-  const snapshot = validated.cards.map((id) => ({ id, lv: levels.get(id) ?? 0 }));
-  const setup = buildSetup({ kind, mode, opponentId, modifier, seed, playerCardIds: validated.cards, playerEnhance: snapshot.map((slot) => slot.lv), battleId });
+  const snapshot = validated.cards.map((id) => {
+    const progress = progressOf(owned.find((row) => row.card_id === id)!);
+    return { id, lv: progress.enhanceLevel, progress };
+  });
+  const setup = buildSetup({ kind, mode, opponentId, modifier, seed, playerCardIds: validated.cards, playerEnhance: snapshot.map((slot) => slot.lv), playerProgress: snapshot.map((slot) => slot.progress), battleId });
   const opponent = opponentById(opponentId, mode)!;
 
   // Keep the table bounded: an authenticated client could otherwise open battles forever.
@@ -854,7 +866,7 @@ export async function startBattle(
       SELECT id FROM battles WHERE user_id = ? AND result = 'pending' ORDER BY created_at DESC, id DESC LIMIT ?
     )
   `).bind(userId, userId, MAX_PENDING_BATTLES - 1).run();
-  await db.prepare(`
+  const insertBattle = db.prepare(`
     INSERT INTO battles
       (id, user_id, kind, mode, opponent_id, deck_id, ruleset_version, seed, deck_cards, modifier, decisions, result, kst_date, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'pending', ?, ?)
@@ -871,7 +883,11 @@ export async function startBattle(
     JSON.stringify(modifier),
     kst,
     now.toISOString()
-  ).run();
+  );
+  await db.batch([
+    ...validated.cards.map((id) => ownedRowGuard(db, userId, owned.find((entry) => entry.card_id === id)!)),
+    insertBattle
+  ]);
 
   return {
     battleId,
@@ -981,27 +997,14 @@ export async function finishBattle(
   // Bounded to the keys this settlement can read: first clears for this opponent/mode, the daily
   // key for the battle's own KST date, and the achievement keys.
   const claims = await progressClaims(userId, kst);
-  const plan = planBattleRewards(
-    {
-      kind: row.kind === 'daily' ? 'daily' : 'pve',
-      opponentId: row.opponent_id,
-      mode,
-      result,
-      kstDate: kst,
-      firstClear: !claims.has(pveFirstClearClaimKey(row.opponent_id, mode))
-    },
-    opponent.reward.credits
-  );
-  // Cryptographic server draw on settlement: never predictable before battle starts.
-  // In daily mode, tickets only drop if the daily claim hasn't been claimed yet.
-  const dailyAlreadyPaid = row.kind === 'daily' && claims.has(dailyClaimKey(kst));
-  const dropType = result === 'won' && !dailyAlreadyPaid ? rollTicketDrop(mode, randomUnit()) : null;
-  const ticketQuantity = dropType ? 1 : 0;
+  const plan = row.kind === 'daily' ? planBattleRewards({ kind: 'daily', opponentId: row.opponent_id, mode, result, kstDate: kst, firstClear: false, battleId }, 0) : { credits: 0, claims: [], lines: [] };
+  const victory = result === 'won' && row.kind !== 'daily' ? victoryTicketReward(mode, row.opponent_id) : null;
   const progress = await achievementProgress(userId, {
     won: result === 'won',
     opponentId: row.opponent_id,
     kind: row.kind,
     cardIds: safeCards(row.deck_cards),
+    nOnly: setup.player.every((card) => card.rarity === 'N'),
     clutch
   });
   const unlocked = evaluateAchievements(progress).filter((id) => !claims.has(achievementClaimKey(id)));
@@ -1014,7 +1017,7 @@ export async function finishBattle(
     rounds: simulation.state.round,
     damageDealt: damage
   };
-  const nOnly = safeCards(row.deck_cards).every((id) => CARD_BY_ID.get(id)?.rarity === 'N') ? 1 : 0;
+  const nOnly = setup.player.every((card) => card.rarity === 'N') ? 1 : 0;
 
   try {
     await db.batch([
@@ -1026,11 +1029,11 @@ export async function finishBattle(
           n_only = ?, decisions = ?, summary = ?, completed_at = ?
         WHERE id = ? AND user_id = ? AND result = 'pending'`)
         .bind(result, simulation.state.round, damage, clutch ? 1 : 0, summary.mvpCardId, nOnly, JSON.stringify(verified), JSON.stringify(summary), claimedAt, battleId, userId),
-      ...plan.claims.map((key) => {
-        const isDaily = row.kind === 'daily';
-        return db.prepare('INSERT OR IGNORE INTO reward_claims (user_id, claim_key, credits, ticket_type, ticket_quantity, battle_id, claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .bind(userId, key, plan.credits, isDaily ? dropType : null, isDaily ? ticketQuantity : 0, battleId, claimedAt);
-      }),
+      ...plan.claims.map((claim) => db.prepare('INSERT OR IGNORE INTO reward_claims (user_id, claim_key, credits, ticket_type, ticket_quantity, battle_id, claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(userId, claim.key, claim.credits, claim.ticketType ?? null, claim.quantity ?? 0, battleId, claimedAt)),
+      ...(victory ? [`ticket:${battleId}`, pveFirstClearClaimKey(row.opponent_id, mode)].map((key) =>
+        db.prepare('INSERT OR IGNORE INTO reward_claims (user_id, claim_key, credits, ticket_type, ticket_quantity, battle_id, claimed_at) VALUES (?, ?, 0, ?, ?, ?, ?)')
+          .bind(userId, key, victory.ticketType, victory.quantity, battleId, claimedAt)) : []),
       ...unlocked.map((id) =>
         db.prepare('INSERT OR IGNORE INTO user_achievements (user_id, achievement_id, unlocked_at) VALUES (?, ?, ?)')
           .bind(userId, id, claimedAt)
@@ -1039,17 +1042,14 @@ export async function finishBattle(
         db.prepare('INSERT OR IGNORE INTO reward_claims (user_id, claim_key, credits, battle_id, claimed_at) VALUES (?, ?, ?, ?, ?)')
           .bind(userId, achievementClaimKey(id), achievementById(id)?.reward ?? 0, battleId, claimedAt)
       ),
-      // For non-daily wins, ticket drop has its own claim key tied to this battle.
-      ...(dropType && row.kind !== 'daily'
-        ? [
-            db.prepare('INSERT INTO reward_claims (user_id, claim_key, credits, ticket_type, ticket_quantity, battle_id, claimed_at) VALUES (?, ?, 0, ?, ?, ?, ?)')
-              .bind(userId, ticketDropClaimKey(battleId), dropType, ticketQuantity, battleId, claimedAt)
-          ]
-        : []),
       // Credits come from the claims that actually landed in this transaction, so a concurrent
       // finish of the same battle cannot pay twice. claimed_at is this request's nonce.
       db.prepare(`UPDATE user_game_state SET pull_credits = pull_credits + (
-          SELECT COALESCE(SUM(credits), 0) FROM reward_claims
+          SELECT COALESCE(SUM(credits + CASE WHEN ticket_type = 'normal' THEN ticket_quantity ELSE 0 END), 0) FROM reward_claims
+          WHERE user_id = ? AND battle_id = ? AND claimed_at = ?
+        ),
+        low_tickets = low_tickets + (
+          SELECT COALESCE(SUM(CASE WHEN ticket_type = 'low' THEN ticket_quantity ELSE 0 END), 0) FROM reward_claims
           WHERE user_id = ? AND battle_id = ? AND claimed_at = ?
         ),
         sr_tickets = sr_tickets + (
@@ -1060,7 +1060,7 @@ export async function finishBattle(
           SELECT COALESCE(SUM(CASE WHEN ticket_type = 'ssr' THEN ticket_quantity ELSE 0 END), 0) FROM reward_claims
           WHERE user_id = ? AND battle_id = ? AND claimed_at = ?
         ) WHERE user_id = ?`)
-        .bind(userId, battleId, claimedAt, userId, battleId, claimedAt, userId, battleId, claimedAt, userId)
+        .bind(userId, battleId, claimedAt, userId, battleId, claimedAt, userId, battleId, claimedAt, userId, battleId, claimedAt, userId)
     ]);
   } catch (error) {
     const settled = (await db
@@ -1103,9 +1103,9 @@ async function buildAuthoritativeSummary(
     }
     if (c.ticket_type && c.ticket_quantity > 0) {
       actualRewards.push({
-        label: c.ticket_type === 'ssr' ? 'SSR 이상 뽑기권' : 'SR 이상 뽑기권',
+        label: c.ticket_type === 'low' ? '하급 뽑기권' : c.ticket_type === 'normal' ? '보통 뽑기권' : c.ticket_type === 'ssr' ? 'SSR 이상 뽑기권' : 'SR 이상 뽑기권',
         credits: 0,
-        ticketType: c.ticket_type as 'sr' | 'ssr',
+        ticketType: c.ticket_type as TicketType,
         quantity: c.ticket_quantity
       });
     }
@@ -1178,16 +1178,15 @@ async function unlockedModesFor(userId: string): Promise<BattleMode[]> {
 /** Cumulative achievement counters, including the battle that is finishing right now. */
 async function achievementProgress(
   userId: string,
-  pending: { won: boolean; opponentId: string; kind: string; cardIds: string[]; clutch: boolean }
+  pending: { won: boolean; opponentId: string; kind: string; cardIds: string[]; nOnly: boolean; clutch: boolean }
 ): Promise<AchievementProgress> {
   const db = getDatabase();
   const [pullResult, inventoryResult] = await db.batch([
     db.prepare('SELECT COUNT(*) AS total FROM pull_history WHERE user_id = ?').bind(userId),
-    db.prepare('SELECT card_id FROM inventory WHERE user_id = ?').bind(userId)
+    db.prepare('SELECT * FROM inventory WHERE user_id = ?').bind(userId)
   ]);
   const counters = await battleCounters(userId);
-  const rarityById = new Map(cards.map((card) => [card.id, card.rarity] as const));
-  const owned = inventoryResult.results as Array<{ card_id: string }>;
+  const owned = inventoryResult.results as unknown as OwnedRow[];
   const pulls = pullResult.results[0] as { total: number } | undefined;
   return {
     // The battle being settled is already stored as pending, so its win is not counted yet.
@@ -1197,10 +1196,10 @@ async function achievementProgress(
     dailyClears: counters.dailyClears + (pending.won && pending.kind === 'daily' ? 1 : 0),
     nOnlyWins:
       counters.nOnlyWins +
-      (pending.won && pending.cardIds.every((id) => rarityById.get(id) === 'N') ? 1 : 0),
+      (pending.won && pending.nOnly ? 1 : 0),
     clutchWins: counters.clutchWins + (pending.won && pending.clutch ? 1 : 0),
     totalPulls: Number(pulls?.total ?? 0),
-    ownedRarities: [...new Set(owned.map((row) => rarityById.get(row.card_id)).filter((value): value is Rarity => Boolean(value)))]
+    ownedRarities: [...new Set(owned.map((row) => progressOf(row).rarity).filter((value): value is Rarity => Boolean(value)))]
   };
 }
 
@@ -1251,6 +1250,7 @@ export async function replayBattle(userId: string, battleId: string) {
     .bind(battleId, userId)
     .first()) as BattleRowFull | null;
   if (!row) throw new GameError('not_found', '전투를 찾을 수 없습니다.');
+  if (Number(row.ruleset_version) !== BATTLE_RULESET_VERSION) throw new GameError('old_ruleset', '이전 규칙의 전투는 재생할 수 없습니다.');
   const setup = setupFromRow(row);
   const mode = parseMode(row.mode);
   const opponent = opponentById(row.opponent_id, mode);

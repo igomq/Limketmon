@@ -2,31 +2,129 @@
 // Node runs these files through native type stripping, so avoid enums/namespaces/parameter properties.
 import type { Card } from '../cards.ts';
 import type { Rarity } from '../rules.ts';
+import { traitValue, type Trait, type TraitId } from '../progression.ts';
 
 /**
  * Bumped whenever a rule change can alter the outcome of a battle for the same seed + decisions.
  * 2: energy regen 1/turn, round cap 40, wounded-only N self-heal.
  * 3: lower base card stats; player enhance levels are snapshotted into the battle.
  * 4: rarity-normalized card stats and per-mode opponents; old pending rows are refused.
+ * 5: earth/water/fire/grass/dark elements, member positions, owned-card traits and the
+ *    2-round element link. A row stored under 4 or earlier is refused (see lib/game.ts)
+ *    instead of re-simulated with rules it was never played under.
  */
-export const BATTLE_RULESET_VERSION = 4;
+export const BATTLE_RULESET_VERSION = 5;
 
 export const BATTLE_MODES = ['normal', 'hard', 'chaos'] as const;
 export type BattleMode = (typeof BATTLE_MODES)[number];
 
-export const ELEMENTS = ['light', 'shadow', 'iron', 'nature', 'spark'] as const;
+export const ELEMENTS = ['earth', 'water', 'fire', 'grass', 'dark'] as const;
 export type Element = (typeof ELEMENTS)[number];
 
 export const ELEMENT_LABEL: Record<Element, string> = {
-  light: '빛',
-  shadow: '어둠',
-  iron: '강철',
-  nature: '자연',
-  spark: '전류'
+  earth: '대지',
+  water: '물',
+  fire: '불',
+  grass: '풀',
+  dark: '암흑'
 };
 
-/** light → shadow → nature → iron → spark → light. The next element in the ring deals +25%. */
-export const ELEMENT_RING: Element[] = ['light', 'shadow', 'nature', 'iron', 'spark'];
+/** water → fire → grass → earth → dark → water. The next element in the ring deals +25%. */
+export const ELEMENT_RING: Element[] = ['water', 'fire', 'grass', 'earth', 'dark'];
+
+// ---------------------------------------------------------------------------
+// Member position (role) — derived from the ability ops, shown in Korean.
+// ---------------------------------------------------------------------------
+
+export const POSITIONS = ['healer', 'tank', 'dealer', 'support'] as const;
+export type Position = (typeof POSITIONS)[number];
+
+export const POSITION_LABEL: Record<Position, string> = {
+  healer: '힐러',
+  tank: '탱커',
+  dealer: '딜러',
+  support: '지원'
+};
+
+/** Priority 회복 → 보호 → 상태이상 → 공격, exactly the order the design spec lists them in. */
+export function positionOf(ability: Ability): Position {
+  const kinds = opKinds(ability.ops);
+  if (kinds.heal) return 'healer';
+  if (kinds.shield) return 'tank';
+  if (kinds.status) return 'support';
+  return 'dealer';
+}
+
+/** Which op families an ability (conditionals included) uses at least once. */
+function opKinds(ops: readonly AbilityOp[]): { heal: boolean; shield: boolean; status: boolean } {
+  const kinds = { heal: false, shield: false, status: false };
+  for (const op of ops) {
+    if (op.op === 'heal') kinds.heal = true;
+    else if (op.op === 'shield') kinds.shield = true;
+    else if (op.op === 'apply_status' || op.op === 'modify_stat') kinds.status = true;
+    else if (op.op === 'conditional') {
+      const nested = opKinds(op.then);
+      kinds.heal = kinds.heal || nested.heal;
+      kinds.shield = kinds.shield || nested.shield;
+      kinds.status = kinds.status || nested.status;
+    }
+  }
+  return kinds;
+}
+
+// ---------------------------------------------------------------------------
+// Element link (연계): the last element that hit a target, and the pairs that pay off.
+// ---------------------------------------------------------------------------
+
+export interface ElementMark {
+  element: Element;
+  round: number;
+}
+
+export interface ElementLink {
+  /** Element of the earlier hit, still recorded on the target. */
+  from: Element;
+  /** Element of the follow-up hit that cashes the mark in. */
+  to: Element;
+  name: string;
+}
+
+export const ELEMENT_LINKS: ElementLink[] = [
+  { from: 'fire', to: 'water', name: '증발' },
+  { from: 'water', to: 'grass', name: '개화' },
+  { from: 'grass', to: 'fire', name: '연소' },
+  { from: 'earth', to: 'dark', name: '침식' },
+  { from: 'dark', to: 'earth', name: '붕괴' }
+];
+
+/** Follow-up damage multiplier of a link; a synergy trait grows it further. */
+export const SYNERGY_BASE = 1.3;
+/** The marked element must be at most this many rounds old when the follow-up lands. */
+export const SYNERGY_WINDOW_ROUNDS = 2;
+/** No single resistance trait may cut more than this share of the incoming damage. */
+export const RESIST_MAX = 0.7;
+
+const LINK_BY_PAIR = new Map(ELEMENT_LINKS.map((link) => [`${link.from}>${link.to}`, link]));
+
+export function elementLinkOf(from: Element, to: Element): ElementLink | undefined {
+  return LINK_BY_PAIR.get(`${from}>${to}`);
+}
+
+/** Trait that reduces incoming damage of one element. */
+export function resistTraitId(element: Element): TraitId {
+  return `resist_${element}` as TraitId;
+}
+
+/** Highest effective value of one trait id on a card. Missing trait = 0. */
+export function traitEffect(traits: readonly Trait[] | undefined, id: TraitId): number {
+  let best = 0;
+  for (const trait of traits ?? []) {
+    if (trait.id !== id) continue;
+    const value = traitValue(trait);
+    if (value > best) best = value;
+  }
+  return best;
+}
 
 export const STATUS_IDS = [
   'poison',
@@ -133,6 +231,12 @@ export interface Combatant {
   ability: Ability;
   /** Additional active skills unlocked by duplicate enhancement. Empty for opponents and old snapshots. */
   skills: Ability[];
+  /** Role derived from the signature ability ops (healer/tank/dealer/support). */
+  position: Position;
+  /** Characteristic traits carried by the owned card row; empty for opponents and old snapshots. */
+  traits: Trait[];
+  /** Last element that damaged this combatant, with the round it landed, for the element link. */
+  mark: ElementMark | null;
   statuses: StatusInstance[];
 }
 
@@ -151,6 +255,10 @@ export interface CombatantSeed {
   skills?: Ability[];
   /** Player-side duplicate enhance. Omitted or 0 for opponents and old snapshots. */
   enhance?: number;
+  /** Role; omitted (old snapshots, hand-written fixtures) derives it from the ability. */
+  position?: Position;
+  /** Characteristic traits of the owned row. Omitted means none. */
+  traits?: Trait[];
 }
 
 export interface BattleSetup {
@@ -208,6 +316,8 @@ export type BattleEvent =
       crit: boolean;
       element: 'strong' | 'weak' | 'neutral';
       absorbed: number;
+      /** Set when this hit cashed in a 2-round element link (연계). */
+      synergy?: { name: string; multiplier: number };
     }
   | { t: 'heal'; uid: string; target: string; amount: number; source: 'skill' | 'regen' }
   | { t: 'shield'; uid: string; target: string; amount: number }

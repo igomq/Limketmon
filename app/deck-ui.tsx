@@ -5,8 +5,10 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { Card } from '../lib/cards';
 import { cardTitle } from '../lib/collection';
 import type { DeckSummary } from '../lib/battle/api';
+import { rarityRank } from '../lib/rules';
 import { DECK_NAME_MAX, DECK_SIZE, MAX_DECKS, validateDeck } from '../lib/decks';
-import { CardArtwork, Icon, spring } from './card-ui';
+import type { InventoryRow } from './progression-ui';
+import { CardArtwork, CardBadges, Icon, isTranscended, spring } from './card-ui';
 import './battle.css';
 
 type User = { email: string; displayName: string } | null;
@@ -16,6 +18,8 @@ type DeckViewProps = {
   decks: DeckSummary[];
   ownedCardIds: string[];
   cards: Card[];
+  /** Owned rows: effective card + growth state, so every slot can show +n / 유효등급 / 초월. */
+  inventory: InventoryRow[];
   busy: boolean;
   onDecksChange: (decks: DeckSummary[]) => void;
   onOpenCard: (card: Card) => void;
@@ -24,12 +28,15 @@ type DeckViewProps = {
 
 const signInHref = `/signin-with-chatgpt?return_to=${encodeURIComponent('/#deck')}`;
 
-export function DeckView({ user, decks, ownedCardIds, cards, busy, onDecksChange, onOpenCard, onError }: DeckViewProps) {
+export function DeckView({ user, decks, ownedCardIds, cards, inventory, busy, onDecksChange, onOpenCard, onError }: DeckViewProps) {
   const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
   const owned = useMemo(() => new Set(ownedCardIds), [ownedCardIds]);
+  /** One owned row per id: the source for +n, effective rarity, traits and the base-kind guard. */
+  const rows = useMemo(() => new Map(inventory.map((row) => [row.cardId, row])), [inventory]);
+  const baseOf = (cardId: string) => rows.get(cardId)?.baseCardId || cardId;
   const ownedCards = useMemo(
-    () => ownedCardIds.reduce<Card[]>((list, id) => { const card = byId.get(id); if (card) list.push(card); return list; }, []),
-    [ownedCardIds, byId]
+    () => ownedCardIds.reduce<Card[]>((list, id) => { const card = rows.get(id)?.card ?? byId.get(id); if (card) list.push(card); return list; }, []),
+    [ownedCardIds, rows, byId]
   );
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -48,6 +55,13 @@ export function DeckView({ user, decks, ownedCardIds, cards, busy, onDecksChange
   const dirty = !!editing && (draft.length !== editing.cards.length || draft.some((id, index) => id !== editing.cards[index]));
   const check = validateDeck(draft, owned);
   const pickCheck = validateDeck(pick, owned);
+  /** 합성·초월 카드는 보유 ID가 달라도 원본 카드가 같으면 한 덱에 함께 나갈 수 없다. */
+  const deckError = !check.ok
+    ? check.error
+    : new Set(draft.map(baseOf)).size !== draft.length
+      ? '같은 원본 카드는 한 덱에 두 번 넣을 수 없어요.'
+      : null;
+  const pickSameKind = new Set(pick.map(baseOf)).size === pick.length;
 
   useEffect(() => {
     if (decks.some((deck) => deck.id === editingId)) return;
@@ -218,6 +232,19 @@ export function DeckView({ user, decks, ownedCardIds, cards, busy, onDecksChange
                         <span>카드 {deck.cards.length}장</span>
                         {!legal && <span className="deck-warn">전투하려면 3장 필요</span>}
                       </span>
+                      <span className="deck-cards">
+                        {deck.cards.map((cardId) => {
+                          const row = rows.get(cardId);
+                          const card = row?.card ?? byId.get(cardId);
+                          if (!card) return null;
+                          return (
+                            <span key={cardId} className={`deck-card-chip rarity-${card.rarity}`}>
+                              {cardTitle(card)}{row && row.enhanceLevel > 0 ? ` +${row.enhanceLevel}` : ''}
+                              {isTranscended(card.rarity, row?.traits) && <Icon name="sparkle" />}
+                            </span>
+                          );
+                        })}
+                      </span>
                     </button>
                     <div className="deck-row-actions">
                       {renamingId === deck.id ? (
@@ -259,21 +286,23 @@ export function DeckView({ user, decks, ownedCardIds, cards, busy, onDecksChange
               <div className="deck-editor-head">
                 <h2 id="deck-editor-title">{editing.name}</h2>
                 <p className="deck-hint" role="status">
-                  <Icon name={check.ok ? 'check' : 'clock'} />
-                  {check.ok ? '지금 그대로 전투에 쓸 수 있어요.' : check.error}
+                  <Icon name={deckError ? 'clock' : 'check'} />
+                  {deckError ?? '지금 그대로 전투에 쓸 수 있어요.'}
                 </p>
               </div>
               <ol className="deck-slots">
                 {Array.from({ length: DECK_SIZE }, (_, index) => {
                   const cardId = draft[index];
-                  const card = cardId ? byId.get(cardId) : undefined;
+                  const row = cardId ? rows.get(cardId) : undefined;
+                  const card = cardId ? row?.card ?? byId.get(cardId) : undefined;
                   return (
                     <li key={index} className={`deck-slot ${card ? '' : 'is-empty'}`}>
                       <span className="slot-index" aria-hidden="true">{index + 1}</span>
                       {card ? (
                         <>
                           <div className="slot-art"><CardArtwork card={card} /></div>
-                          <p className="slot-name">{cardTitle(card)}</p>
+                          <p className="slot-name">{cardTitle(card)}{row && row.enhanceLevel > 0 ? ` +${row.enhanceLevel}` : ''}</p>
+                          <CardBadges card={card} progress={row} />
                           <div className="slot-actions">
                             <button className="text-button" onClick={() => onOpenCard(card)}>정보</button>
                             <button className="text-button danger" onClick={() => setDraft((current) => current.filter((_, position) => position !== index))}>빼기</button>
@@ -291,7 +320,7 @@ export function DeckView({ user, decks, ownedCardIds, cards, busy, onDecksChange
                   <Icon name={dirty ? 'clock' : 'check'} />
                   {dirty ? '저장하지 않은 변경사항이 있어요.' : '모든 변경사항을 저장했어요.'}
                 </span>
-                <button className="btn btn-primary" disabled={!dirty || !check.ok || working} onClick={() => void save()}>
+                <button className="btn btn-primary" disabled={!dirty || !!deckError || working} onClick={() => void save()}>
                   {pending === 'save' ? '저장 중…' : '덱 저장'}
                 </button>
               </div>
@@ -305,9 +334,10 @@ export function DeckView({ user, decks, ownedCardIds, cards, busy, onDecksChange
         <CardPicker
           cards={ownedCards}
           selected={pick}
-          valid={pickCheck.ok}
+          valid={pickCheck.ok && pickSameKind}
           busy={working}
           confirmLabel={creating ? '이 카드로 덱 만들기' : '이 카드들로 정하기'}
+          rows={rows}
           onToggle={toggle}
           onClose={() => { setPicking(false); if (creating) setNewName(creating); setCreating(null); }}
           onApply={() => void applyPick()}
@@ -317,9 +347,10 @@ export function DeckView({ user, decks, ownedCardIds, cards, busy, onDecksChange
   );
 }
 
-function CardPicker({ cards, selected, valid, busy, confirmLabel, onToggle, onClose, onApply }: {
+function CardPicker({ cards, selected, rows, valid, busy, confirmLabel, onToggle, onClose, onApply }: {
   cards: Card[];
   selected: string[];
+  rows: Map<string, InventoryRow>;
   valid: boolean;
   busy: boolean;
   confirmLabel: string;
@@ -330,6 +361,13 @@ function CardPicker({ cards, selected, valid, busy, confirmLabel, onToggle, onCl
   const reduced = useReducedMotion();
   const dialog = useRef<HTMLDialogElement>(null);
   const full = selected.length >= DECK_SIZE;
+  const [highFirst, setHighFirst] = useState(true);
+  // 등급 정렬은 유효등급(합성·초월 결과 포함) 기준. 같은 등급은 도감 번호 순서.
+  const ordered = useMemo(() => [...cards].sort((a, b) => {
+    const byRarity = rarityRank(a.rarity) - rarityRank(b.rarity);
+    return (highFirst ? byRarity : -byRarity) || a.version - b.version || a.id.localeCompare(b.id);
+  }), [cards, highFirst]);
+  const duplicateKind = new Set(selected.map((cardId) => rows.get(cardId)?.baseCardId || cardId)).size !== selected.length;
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -370,11 +408,18 @@ function CardPicker({ cards, selected, valid, busy, confirmLabel, onToggle, onCl
           <span className="picker-count" role="status">{selected.length}<small>/ {DECK_SIZE}</small></span>
         </header>
         <p className="picker-hint" role="status">
-          {full ? '3장을 모두 골랐어요. 바꾸려면 먼저 골라둔 카드를 빼주세요.' : selected.length ? `${DECK_SIZE - selected.length}장 더 골라주세요.` : '보유한 카드에서 3장을 골라주세요.'}
+          {duplicateKind
+            ? '같은 원본 카드는 한 덱에 두 번 넣을 수 없어요. 하나를 빼주세요.'
+            : full ? '3장을 모두 골랐어요. 바꾸려면 먼저 골라둔 카드를 빼주세요.' : selected.length ? `${DECK_SIZE - selected.length}장 더 골라주세요.` : '보유한 카드에서 3장을 골라주세요.'}
         </p>
+        <div className="sort-toggle" role="group" aria-label="카드 정렬">
+          <button aria-pressed={highFirst} onClick={() => setHighFirst(true)}>등급 내림</button>
+          <button aria-pressed={!highFirst} onClick={() => setHighFirst(false)}>등급 오름</button>
+        </div>
         {cards.length ? (
           <ul className="picker-grid">
-            {cards.map((card) => {
+            {ordered.map((card) => {
+              const row = rows.get(card.id);
               const index = selected.indexOf(card.id);
               const chosen = index >= 0;
               return (
@@ -390,6 +435,7 @@ function CardPicker({ cards, selected, valid, busy, confirmLabel, onToggle, onCl
                     {chosen && <span className="picker-order">{index + 1}</span>}
                     <span className="picker-check" aria-hidden="true"><Icon name={chosen ? 'check' : 'sparkle'} /></span>
                   </button>
+                  <CardBadges card={card} progress={row} />
                 </li>
               );
             })}

@@ -1,10 +1,25 @@
 import type { Card } from './cards';
 import { kstDate } from './rules.ts';
 
-/** Which balance a pull spends. 'normal' is the existing credit pool (and the daily free single). */
-export type TicketType = 'normal' | 'sr' | 'ssr';
+/**
+ * Which balance a pull spends. 'normal' is the credit pool (and the daily free single); 'low',
+ * 'sr' and 'ssr' each spend their own guaranteed ticket column.
+ */
+export type TicketType = 'low' | 'normal' | 'sr' | 'ssr';
 
-const TICKET_COLUMN: Record<Exclude<TicketType, 'normal'>, string> = { sr: 'sr_tickets', ssr: 'ssr_tickets' };
+/** Korean labels for receipt lines and the pull UI. */
+export const TICKET_LABEL: Record<TicketType, string> = {
+  low: '하급 뽑기권',
+  normal: '보통 뽑기권',
+  sr: 'SR 이상 뽑기권',
+  ssr: 'SSR 이상 뽑기권'
+};
+
+const TICKET_COLUMN: Record<Exclude<TicketType, 'normal'>, string> = {
+  low: 'low_tickets',
+  sr: 'sr_tickets',
+  ssr: 'ssr_tickets'
+};
 
 // D1 batch is one transaction: charging and granting cards must succeed together.
 export async function savePull(
@@ -16,13 +31,17 @@ export async function savePull(
   pityTo: number,
   ticketType: TicketType = 'normal'
 ) {
+  // fromPity/pityTo are retained only so old callers keep compiling; the pull no longer consults
+  // or updates a pity counter.
+  void fromPity;
+  void pityTo;
   const count = drawn.length;
   if (count !== 1 && count !== 5 && count !== 10) throw new Error('Invalid pull count');
   const today = kstDate(now);
   const pulledAt = now.toISOString();
- const writes = drawn.flatMap((card) => [
-   db.prepare(`
-     INSERT INTO inventory (user_id, card_id, quantity, first_obtained_at)
+  const writes = drawn.flatMap((card) => [
+    db.prepare(`
+      INSERT INTO inventory (user_id, card_id, quantity, first_obtained_at)
       SELECT ?, ?, 1, ?
       WHERE EXISTS (SELECT 1 FROM user_game_state WHERE user_id = ?)
       ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 1
@@ -35,28 +54,20 @@ export async function savePull(
     `).bind(crypto.randomUUID(), userId, card.id, card.rarity, pulledAt, userId)
   ]);
   const isNormal = ticketType === 'normal';
-  // Normal pulls run the pity compare-and-set (a stale counter writes the -1 sentinel that the
-  // guard trigger aborts). Guaranteed ticket pulls never touch pity: a paid SR+/SSR+ ticket must
-  // not dilute the normal pity ladder, and the guarded decrement below is their own race check.
+  // The normal pool charges credits, except the daily free single: a one-card pull with no KST
+  // date recorded yet costs nothing. Guaranteed tickets decrement their own column unconditionally;
+  // an overdraft writes a negative value that trg_user_game_state_ticket_guard turns into a ROLLBACK.
   const charge = isNormal
     ? db.prepare(`
       UPDATE user_game_state SET
         pull_credits = user_game_state.pull_credits - CASE
           WHEN ? = 1 AND (user_game_state.last_free_pull_date IS NULL OR user_game_state.last_free_pull_date != ?) THEN 0
           ELSE ? END,
-        last_free_pull_date = CASE WHEN ? = 1 THEN ? ELSE user_game_state.last_free_pull_date END,
-        -- Compare and set, evaluated before the card writes below. A pull whose roll used a
-        -- counter another request already advanced writes the -1 sentinel instead, and
-        -- trg_user_game_state_pity_guard aborts the whole transaction on it. The abort must
-        -- happen inside the transaction: a zero-row UPDATE would let the card writes commit for
-        -- free, and a check after the batch would report a failure that already paid out.
-        pity_counter = CASE WHEN user_game_state.pity_counter = ? THEN ? ELSE -1 END
+        last_free_pull_date = CASE WHEN ? = 1 THEN ? ELSE user_game_state.last_free_pull_date END
       WHERE user_id = ?
-    `).bind(count, today, count, count, today, fromPity, pityTo, userId)
+    `).bind(count, today, count, count, today, userId)
     : (() => {
         const column = TICKET_COLUMN[ticketType];
-        // Unconditional decrement: an overdraft writes a negative value, which
-        // trg_user_game_state_ticket_guard turns into a ROLLBACK of the whole batch.
         return db.prepare(`UPDATE user_game_state SET ${column} = ${column} - ? WHERE user_id = ?`).bind(count, userId);
       })();
   let results;
@@ -73,9 +84,11 @@ export async function savePull(
     }
     throw error;
   }
-  // No charge means the compare-and-set lost the race (normal) or the balance was short (ticket).
+  // No charge means the account has no user_game_state row (the UPDATE matched nothing). The card
+  // writes carry the same EXISTS guard, so nothing was granted and the caller sees a failure.
   if (!Number((results[1]?.meta as { changes?: number } | undefined)?.changes ?? 0)) {
-    throw isNormal ? new ConcurrentPull() : new InsufficientTickets(ticketType);
+    if (!isNormal) throw new InsufficientTickets(ticketType);
+    throw new MissingPullState();
   }
   const previous = results[0]!.results[0] as { last_free_pull_date: string | null } | undefined;
   return drawn.map((card, index) => {
@@ -89,10 +102,10 @@ export async function savePull(
   });
 }
 
-/** Raised when another pull advanced the pity counter between our read and our write. */
-export class ConcurrentPull extends Error {
+/** Raised when the account has no game-state row, so nothing can be charged or granted. */
+export class MissingPullState extends Error {
   constructor() {
-    super('pity_changed');
+    super('pull_state_missing');
   }
 }
 

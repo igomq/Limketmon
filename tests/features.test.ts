@@ -104,7 +104,7 @@ test('auto deck picks the strongest owned cards and never invents cards', async 
 test('auto deck refuses politely when the collection is too small', async () => {
   reset();
   seedOwned(db, USER, cardIdsByRarity({ N: 2 }));
-  await assert.rejects(game.autoDeck(USER), /3장 필요/);
+  await assert.rejects(game.autoDeck(USER), /3장/);
 });
 
 /** Plays a started battle with the shared engine, preferring skills and falling back to attacks. */
@@ -113,16 +113,17 @@ function play(setup: Awaited<ReturnType<typeof game.startBattle>>) {
     const { advance, createBattle } = await import('../lib/battle/engine.ts');
     const { aiDecision } = await import('../lib/battle/ai.ts');
     const { opponentById } = await import('../lib/battle/opponents.ts');
-    const full = buildSetup({
-      kind: setup.kind,
-      opponentId: setup.opponentId,
-      modifier: setup.modifier,
-      seed: setup.seed,
-      playerCardIds: setup.player.map((entry) => entry.cardId),
-      playerEnhance: setup.player.map((entry: { enhance?: number }) => entry.enhance ?? 0),
-      battleId: setup.battleId
-    });
-    const profile = opponentById(setup.opponentId)!.profile;
+    const full = {
+    battleId: setup.battleId,
+    kind: setup.kind,
+    mode: setup.mode,
+    opponentId: setup.opponentId,
+    modifier: setup.modifier,
+    seed: setup.seed,
+    player: setup.player,
+    opponent: setup.opponent
+  };
+    const profile = opponentById(setup.opponentId, setup.mode ?? 'normal')!.profile;
     let state = createBattle(full);
     const decisions: Array<{ uid: string; action: 'attack' | 'skill' }> = [];
     for (let step = 0; step < 500 && state.status === 'active'; step++) {

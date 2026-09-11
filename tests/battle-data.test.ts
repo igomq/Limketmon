@@ -50,7 +50,7 @@ test('stats: rarity-normalized derivation matches the documented power anchors',
 
 test('stats: ability identity is stable and keeps the curated Korean copy', () => {
   assert.equal(STAT_RULESET, 3);
-  assert.equal(ABILITY_RULESET, 2);
+  assert.equal(ABILITY_RULESET, 3);
   for (const card of cards) {
     const { ability } = battleStats(card);
     assert.equal(ability.id, `ability:${card.id}@${ABILITY_RULESET}`, card.id);
@@ -60,7 +60,7 @@ test('stats: ability identity is stable and keeps the curated Korean copy', () =
     assert.equal(ability.ops.length > 0, true, card.id);
   }
   assert.ok(Object.keys(CURATED_ABILITIES).length <= 6);
-  assert.equal(battleStats(cardById('imsingyu-v033')).ability.ops.length, 2);
+  assert.deepEqual(battleStats(cardById('imsingyu-v033')).ability.ops, CURATED_ABILITIES['imsingyu-v033']!.ops);
 });
 
 test('stats: derivation is deterministic across calls and a fresh manifest parse', async () => {
@@ -150,18 +150,21 @@ test('opponents: five distinct ladders over real manifest cards', () => {
   assert.equal(new Set(OPPONENTS.map((opponent) => JSON.stringify(opponent.profile))).size, 5);
   assert.equal(new Set(OPPONENTS.map((opponent) => JSON.stringify(opponent.cards))).size, 5);
 
+  const baseRookie = OPPONENTS.find((opponent) => opponent.id === DEFAULT_OPPONENT_ID)!;
+  const baseBoss = OPPONENTS.find((opponent) => opponent.id === 'boss')!;
   const rookie = opponentById(DEFAULT_OPPONENT_ID);
   const boss = opponentById('boss');
   assert.ok(rookie);
   assert.ok(boss);
   assert.ok(rookie.cards.every((cardId) => ['N', 'R'].includes(cardById(cardId).rarity)));
   assert.equal(boss.profile.skillAppetite, Math.max(...OPPONENTS.map((opponent) => opponent.profile.skillAppetite)));
-  assert.equal(boss.hpScale, Math.max(...OPPONENTS.map((opponent) => opponent.hpScale)));
+  assert.equal(baseBoss.hpScale, Math.max(...OPPONENTS.map((opponent) => opponent.hpScale)));
+  assert.ok(Math.abs(boss.hpScale - baseBoss.hpScale * 1.2) < 1e-9);
   assert.equal(boss.reward.credits, Math.max(...OPPONENTS.map((opponent) => opponent.reward.credits)));
-  const ranks: Record<Card['rarity'], number> = { N: 0, R: 1, SR: 2, SSR: 3, UR: 4 };
+  const ranks: Record<Card['rarity'], number> = { N: 0, R: 1, SR: 2, SSR: 3, UR: 4, XR: 5 };
   const bossRanks = boss.cards.map((cardId) => ranks[cardById(cardId).rarity]);
   assert.deepEqual(bossRanks, [4, 3, 3]);
-  assert.equal(rookie.hpScale, Math.min(...OPPONENTS.map((opponent) => opponent.hpScale)));
+  assert.equal(baseRookie.hpScale, Math.min(...OPPONENTS.map((opponent) => opponent.hpScale)));
   assert.equal(new Set(OPPONENTS.map((opponent) => opponent.hpScale)).size, 5);
 });
 

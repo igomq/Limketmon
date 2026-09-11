@@ -44,9 +44,9 @@ test("manual verification checklist", async () => {
   step(3, "웰컴 쿠폰: HTTP " + coupon.status + " · 뽑기권 " + couponBody.snapshot.credits + "장");
 
   const five = await pullRoute.POST(post("/api/pull", { count: 5 }));
-  const fiveBody = (await read(five)) as unknown as { results: unknown[]; snapshot: { credits: number; pityRemaining: number; inventory: unknown[] } };
+  const fiveBody = (await read(five)) as unknown as { results: unknown[]; snapshot: { credits: number; inventory: unknown[] } };
   assert.equal(fiveBody.results.length, 5);
-  step(4, "5연속 뽑기: " + fiveBody.results.length + "장 · 뽑기권 " + fiveBody.snapshot.credits + " · 천장까지 " + fiveBody.snapshot.pityRemaining + "회");
+  step(4, "5연속 뽑기: " + fiveBody.results.length + "장 · 뽑기권 " + fiveBody.snapshot.credits + "장");
 
   let state = (await read(await stateRoute.GET())) as unknown as { snapshot: { inventory: Array<{ cardId: string }>; decks: unknown[] } };
   for (let round = 0; round < 20 && state.snapshot.inventory.length < 3; round++) {

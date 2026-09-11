@@ -22,7 +22,11 @@ export const userGameState = sqliteTable(
     pityCounter: integer('pity_counter').notNull().default(0),
     // Guaranteed-pull tickets. Distinct balances: a ticket pull can never spend normal credits.
     srTickets: integer('sr_tickets').notNull().default(0),
-    ssrTickets: integer('ssr_tickets').notNull().default(0)
+    ssrTickets: integer('ssr_tickets').notNull().default(0),
+    lowTickets: integer('low_tickets').notNull().default(0),
+    proof: integer('proof').notNull().default(0),
+    fragments: integer('fragments').notNull().default(0),
+    twinProof: integer('twin_proof').notNull().default(0)
   },
   (table) => [
     check('chk_user_game_state_credits', sql`${table.pullCredits} >= 0`)
@@ -36,7 +40,10 @@ export const inventory = sqliteTable(
     cardId: text('card_id').notNull(),
     quantity: integer('quantity').notNull().default(1),
     firstObtainedAt: text('first_obtained_at').notNull(),
-    enhanceLevel: integer('enhance_level').notNull().default(0)
+    enhanceLevel: integer('enhance_level').notNull().default(0),
+    baseCardId: text('base_card_id'),
+    rarityOverride: text('rarity_override'),
+    traits: text('traits').notNull().default('[]')
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.cardId] }),

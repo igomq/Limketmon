@@ -1,5 +1,5 @@
-// Server-authority tests for decks, battles, rewards and pity, run against the shipped
-// migrations on an in-memory SQLite that mimics the D1 binding.
+// Server-authority tests for decks, battles and rewards, run against the shipped migrations on an
+// in-memory SQLite that mimics the D1 binding.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -20,7 +20,6 @@ env.DB = db;
 
 const game = await import('../lib/game.ts');
 const { OPPONENTS, opponentById } = await import('../lib/battle/opponents.ts');
-const { buildSetup } = await import('../lib/battle/setup.ts');
 const { runBattle } = await import('../lib/battle/simulate.ts');
 const { advance, createBattle } = await import('../lib/battle/engine.ts');
 const { aiDecision } = await import('../lib/battle/ai.ts');
@@ -45,7 +44,8 @@ test('battles are server-authoritative: ownership, verification, first-clear rew
   reset();
   seedOwned(db, USER, cardIdsByRarity({ N: 3, R: 3, SR: 1, SSR: 1, UR: 1 }));
 
-  // A three-R deck: strong enough that the win assertion is about the server, not about luck.
+  // Controlled owned growth makes this a settlement test independent of seed luck.
+  db.exec(`UPDATE inventory SET enhance_level = 15 WHERE user_id = '${USER}'`);
   const owned = cardIdsByRarity({ R: 3 });
   await assert.rejects(game.createDeck(USER, '도둑 덱', cardIdsByRarity({ SSR: 2, UR: 1 })), /보유하지 않은 카드/);
   await assert.rejects(game.createDeck(USER, '중복 덱', [owned[0], owned[0], owned[1]]), /중복/);
@@ -73,13 +73,9 @@ test('battles are server-authoritative: ownership, verification, first-clear rew
 
   const played = play(USER, setup);
   const first = await game.finishBattle(USER, setup.battleId, played.decisions, DAY);
-  // The server draws the seed, so a single battle can legitimately be lost. What must hold is
-  // that a common deck wins sometimes, and that the win pays exactly once.
-  const win = first.result === 'won'
-    ? { battleId: setup.battleId, decisions: played.decisions, summary: first }
-    : await winOnce(USER, decks[0]!.id, 'rookie');
+  const win = { battleId: setup.battleId, decisions: played.decisions, summary: first };
   assert.equal(win.summary.result, 'won', 'a common deck can beat the beginner opponent');
-  assert.ok(win.summary.rewards.some((line) => line.label === '첫 격파 보상'), 'first clear pays');
+  assert.equal(win.summary.rewards.filter((line) => line.ticketType === 'low').reduce((sum, line) => sum + (line.quantity ?? 0), 0), 4, 'win and first clear each pay two low tickets');
   assert.equal(win.summary.mvpCardId !== null && owned.includes(win.summary.mvpCardId), true, 'MVP is one of the deployed cards');
   assert.ok(win.summary.damageDealt > 0);
   assert.ok(win.summary.rounds > 0);
@@ -93,7 +89,7 @@ test('battles are server-authoritative: ownership, verification, first-clear rew
   // A repeat win against the same opponent pays no first-clear reward.
   const second = await game.startBattle(USER, { deckId: decks[0]!.id, opponentId: 'rookie' }, DAY);
   const repeat = await game.finishBattle(USER, second.battleId, play(USER, second).decisions, DAY);
-  assert.equal(repeat.rewards.filter((line) => line.label === '첫 격파 보상').length, 0);
+  assert.equal(repeat.rewards.filter((line) => line.ticketType === 'low').reduce((sum, line) => sum + (line.quantity ?? 0), 0), 2);
   assert.equal(await creditsOf(USER), sumRewards(win.summary) + sumRewards(repeat));
 });
 
@@ -131,6 +127,7 @@ test('daily challenge: same day for everyone, one payout a day, rule enforced', 
   reset();
   seedOwned(db, USER, cardIdsByRarity({ N: 4, R: 4, SR: 2, SSR: 1, UR: 1 }));
   const owned = cardIdsByRarity({ N: 3 });
+  db.exec(`UPDATE inventory SET enhance_level = 15 WHERE user_id = '${USER}'`);
   const [deck] = await game.createDeck(USER, '데일리 덱', owned);
 
   // Deterministic per KST date and identical for every user.
@@ -141,7 +138,7 @@ test('daily challenge: same day for everyone, one payout a day, rule enforced', 
   // Find a day whose opponent is the beginner, so an N deck can actually win the daily.
   let day = new Date('2026-09-10T03:00:00Z');
   let challenge = dailyChallenge(kstDate(day));
-  for (let step = 0; step < 40 && challenge.opponentId !== 'rookie'; step++) {
+  for (let step = 0; step < 40 && !(challenge.opponentId === 'rookie' && challenge.modifier.kind !== 'turn_limit'); step++) {
     day = new Date(day.getTime() + 86_400_000);
     challenge = dailyChallenge(kstDate(day));
   }
@@ -152,10 +149,7 @@ test('daily challenge: same day for everyone, one payout a day, rule enforced', 
   assert.deepEqual(setup.modifier, challenge.modifier);
   const played = play(USER, setup);
   const firstTry = await game.finishBattle(USER, setup.battleId, played.decisions, day);
-  // The server draws the seed, so a loss is possible; the daily must pay on a win and only once.
-  const win = firstTry.result === 'won'
-    ? { battleId: setup.battleId, decisions: played.decisions, summary: firstTry }
-    : await winOnce(USER, deck!.id, challenge.opponentId, day, 'daily');
+  const win = { battleId: setup.battleId, decisions: played.decisions, summary: firstTry };
   const summary = win.summary;
   assert.equal(summary.result, 'won');
   assert.ok(summary.rewards.some((line) => line.label === '데일리 챌린지 보상'), 'daily pays once');
@@ -185,34 +179,25 @@ test('daily challenge: same day for everyone, one payout a day, rule enforced', 
   const highDeck = (await game.createDeck(USER, '고등급 덱', high)).find((entry) => entry.name === '고등급 덱')!;
   await assert.rejects(
     game.startBattle(USER, { deckId: highDeck.id, kind: 'daily' }, capped.date),
-    /등급 이하/
+    (error: unknown) => error instanceof game.GameError && error.code === 'invalid_deck'
   );
   assert.equal(capped.challenge.modifier.kind, 'rarity_cap');
 });
 
-test('pity advances, hard-pity guarantees, and a failed pull rolls pity back', async () => {
+test('a normal pull rolls the flat table and a failed pull rolls its charge back', async () => {
   reset();
-  await db.prepare('UPDATE user_game_state SET pity_counter = ?, pull_credits = 200 WHERE user_id = ?').bind(59, USER).run();
-  const hard = await game.pullCards(USER, 1);
-  assert.ok(['SSR', 'UR'].includes(hard.results[0]!.card.rarity), 'the 60th pull is hard pity');
-  assert.equal(await pityOf(USER), 0, 'an SSR+ resets the counter');
-  assert.equal(hard.snapshot.pityRemaining, 60);
+  await db.prepare('UPDATE user_game_state SET pull_credits = 200 WHERE user_id = ?').bind(USER).run();
+  const one = await game.pullCards(USER, 1);
+  assert.ok(['N', 'R', 'SR', 'SSR', 'UR'].includes(one.results[0]!.card.rarity));
+  assert.equal('pityRemaining' in one.snapshot, false, 'the snapshot no longer carries a pity ladder');
 
-  await db.prepare('UPDATE user_game_state SET pity_counter = 5, pull_credits = 200 WHERE user_id = ?').bind(USER).run();
   const five = await game.pullCards(USER, 5);
   assert.equal(five.results.length, 5);
-  const lastRare = five.results.reduce((last, result, index) => (['SSR', 'UR'].includes(result.card.rarity) ? index : last), -1);
-  // The counter starts at 5 and only resets when a rare lands: after the last rare it counts the
-  // remaining cards, and without a rare the whole batch is added to the starting value.
-  const expected = lastRare >= 0 ? 5 - lastRare - 1 : 5 + 5;
-  assert.equal(await pityOf(USER), expected, '5-pull moves the counter by the same rule as single pulls');
 
-  const before = await pityOf(USER);
   const creditsBefore = await creditsOf(USER);
   db.exec("CREATE TRIGGER fail_pull BEFORE INSERT ON pull_history BEGIN SELECT RAISE(ABORT, 'simulated outage'); END");
   await assert.rejects(game.pullCards(USER, 1));
   db.exec('DROP TRIGGER fail_pull');
-  assert.equal(await pityOf(USER), before, 'a failed pull leaves pity untouched');
   assert.equal(await creditsOf(USER), creditsBefore, 'a failed pull restores credits');
 });
 
@@ -228,15 +213,16 @@ test('existing collection behaviour is unchanged: free pull, coupon, starter dec
   assert.equal(snapshot.daily.cleared, false);
 
   const coupon = await game.redeemCoupon(USER, 'limketmon');
-  assert.equal(coupon.snapshot.credits, 100);
-  assert.deepEqual(coupon.granted, { credits: 100, sr: 0, ssr: 0 });
+  assert.equal(coupon.snapshot.credits, 10, 'LIMKETMON grants ten normal pulls');
+  assert.equal(coupon.snapshot.tickets.ssr, 1, 'and a single SSR+ ticket');
+  assert.equal(coupon.snapshot.tickets.low, 50, 'and fifty low tickets');
   await assert.rejects(game.redeemCoupon(USER, 'LIMKETMON'), /이미 사용한 쿠폰/);
   await assert.rejects(game.redeemCoupon(USER, 'NOPE'), /유효하지 않은/);
 
   const five = await game.pullCards(USER, 5);
   assert.equal(five.results.length, 5);
   assert.equal(five.results.every((result) => !result.usedFreePull), true);
-  assert.equal(await creditsOf(USER), 95);
+  assert.equal(await creditsOf(USER), 5);
 
   // The starter deck appears as soon as three cards are owned, and is legally buildable.
   let owns = (await game.getSnapshot(USER)).inventory.length;
@@ -270,8 +256,7 @@ test('replay reproduces the stored battle; an older ruleset is refused, not re-j
   db.prepare('UPDATE battles SET ruleset_version = 999 WHERE id = ?').bind(stale.battleId).run();
   const refused = await game.finishBattle(USER, stale.battleId, [{ uid: 'a0', action: 'attack' }], DAY);
   assert.deepEqual(refused, { result: 'invalid', rewards: [], unlocked: [], mvpCardId: null, rounds: 0, damageDealt: 0 });
-  const oldReplay = await game.replayBattle(USER, stale.battleId);
-  assert.equal(oldReplay.rulesetVersion, 999, 'the battle keeps the version it was played under');
+  await assert.rejects(game.replayBattle(USER, stale.battleId), /이전 규칙/);
   assert.equal((await game.getSnapshot(USER)).stats.battles >= 1, true);
 });
 
@@ -329,47 +314,26 @@ async function creditsOf(userId: string): Promise<number> {
   return Number(row.pull_credits);
 }
 
-async function pityOf(userId: string): Promise<number> {
-  const row = (await db.prepare('SELECT pity_counter FROM user_game_state WHERE user_id = ?').bind(userId).first()) as { pity_counter: number };
-  return Number(row.pity_counter);
-}
-
 /**
  * Plays until the player wins, capped at a handful of attempts. The server owns the seed, so
  * "this deck can beat this opponent" is a property of the deck, not of one roll.
  */
-async function winOnce(
-  userId: string,
-  deckId: string,
-  opponentId: string,
-  date = DAY,
-  kind: 'pve' | 'daily' = 'pve',
-  attempts = 10
-) {
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const setup = await game.startBattle(userId, { deckId, opponentId, kind }, date);
-    const played = play(userId, setup);
-    const summary = await game.finishBattle(userId, setup.battleId, played.decisions, date);
-    if (summary.result === 'won') return { battleId: setup.battleId, decisions: played.decisions, summary };
-  }
-  throw new Error(`no win against ${opponentId} in ${attempts} attempts`);
-}
-
 /**
  * Plays a started battle deterministically, preferring skills and falling back to attacks.
  * Drives createBattle/advance directly, so a battle costs one pass rather than a replay per turn.
  */
 function play(_userId: string, setup: Awaited<ReturnType<typeof game.startBattle>>) {
-  const full = buildSetup({
+  const full = {
+    battleId: setup.battleId,
     kind: setup.kind,
+    mode: setup.mode,
     opponentId: setup.opponentId,
     modifier: setup.modifier,
     seed: setup.seed,
-    playerCardIds: setup.player.map((entry) => entry.cardId),
-      playerEnhance: setup.player.map((entry: { enhance?: number }) => entry.enhance ?? 0),
-    battleId: setup.battleId
-  });
-  const profile = opponentById(setup.opponentId)!.profile;
+    player: setup.player,
+    opponent: setup.opponent
+  };
+  const profile = opponentById(setup.opponentId, setup.mode ?? 'normal')!.profile;
   let state = createBattle(full);
   const decisions: Array<{ uid: string; action: 'attack' | 'skill' }> = [];
   for (let step = 0; step < 500 && state.status === 'active'; step++) {
@@ -395,16 +359,17 @@ function play(_userId: string, setup: Awaited<ReturnType<typeof game.startBattle
  * to a plain attack otherwise, so the server sees an explicit skill id in the decision log.
  */
 function playWithSkills(setup: Awaited<ReturnType<typeof game.startBattle>>) {
-  const full = buildSetup({
+  const full = {
+    battleId: setup.battleId,
     kind: setup.kind,
+    mode: setup.mode,
     opponentId: setup.opponentId,
     modifier: setup.modifier,
     seed: setup.seed,
-    playerCardIds: setup.player.map((entry) => entry.cardId),
-    playerEnhance: setup.player.map((entry: { enhance?: number }) => entry.enhance ?? 0),
-    battleId: setup.battleId
-  });
-  const profile = opponentById(setup.opponentId)!.profile;
+    player: setup.player,
+    opponent: setup.opponent
+  };
+  const profile = opponentById(setup.opponentId, setup.mode ?? 'normal')!.profile;
   let state = createBattle(full);
   const decisions: Array<{ uid: string; action: 'attack' | 'skill'; skillId?: string }> = [];
   let usedSkill = false;

@@ -5,12 +5,12 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import type { Card, PullResult, Snapshot } from '../lib/game';
 import type { BattleSummaryRow, DeckSummary } from '../lib/battle/api';
 import type { BattleMode } from '../lib/battle/types';
-import { HARD_PITY_AT, RARITY_ORDER, RARITY_WEIGHTS, hardPityOdds, isHardPity, pityOdds, type Rarity } from '../lib/rules';
+import { RARITY_ORDER, RARITY_WEIGHTS, type Rarity } from '../lib/rules';
 import { STATUS_LABEL, type BattleEvent } from '../lib/battle/types';
 import { MODE_LABELS } from '../lib/battle/opponents';
 import { cardTitle, projectedPosition, selectCards, type CollectionFilter } from '../lib/collection';
-import { enhanceMaterials } from '../lib/enhance';
-import { Brand, CardArtwork, CardBack, CardButton, CardDetail, Icon, gentleSpring, spring } from './card-ui';
+import { Brand, CardArtwork, CardBack, CardBadges, CardButton, CardDetail, Icon, gentleSpring, materialsOf, spring } from './card-ui';
+import { DismantlePanel, GrowthView, TraitPanel, TranscendPanel, type ProgressionPreview, type ProgressionReply, type ProgressionRequest } from './progression-ui';
 import './battle.css';
 
 // 대련/덱은 무겁고 홈·카드팩·도감에서 쓰지 않는다. 탭을 열 때만 내려받는다.
@@ -19,14 +19,17 @@ const DeckView = lazy(() => import('./deck-ui').then((module) => ({ default: mod
 
 type User = { email: string; displayName: string } | null;
 type Feedback = { text: string; error: boolean } | null;
+/** POST /api/progression answer. `preview` comes back instead of a write when preview:true. */
+type ProgressionResponse = { snapshot?: Snapshot; message?: string; preview?: ProgressionPreview; error?: string };
 /** Every screen the app can show; a hash may point at any of them. */
-const TABS = ['home', 'pull', 'collection', 'deck', 'battle', 'stats', 'coupon'] as const;
+const TABS = ['home', 'pull', 'collection', 'growth', 'deck', 'battle', 'stats', 'coupon'] as const;
 type Tab = (typeof TABS)[number];
-/** The mobile bar holds five; 덱 opens from 홈/대련 and 쿠폰 from the 계정 영역 뽑기권 표시와 카드팩 화면. */
+/** The mobile bar holds six; 덱 opens from 홈/대련 and 쿠폰 from the 계정 영역 뽑기권 표시와 카드팩 화면. */
 const navItems = [
   { id: 'home', label: '발견', icon: 'home' },
   { id: 'pull', label: '카드팩', icon: 'pack' },
   { id: 'collection', label: '도감', icon: 'grid' },
+  { id: 'growth', label: '성장', icon: 'sparkle' },
   { id: 'battle', label: '대련', icon: 'hand' },
   { id: 'stats', label: '기록', icon: 'clock' }
 ] as const;
@@ -35,19 +38,35 @@ const defaultFilter: CollectionFilter = { query: '', rarity: 'all', ownership: '
 const signIn = (tab: Tab) => `/signin-with-chatgpt?return_to=${encodeURIComponent(`/#${tab}`)}`;
 const nextReset = () => Math.floor((Date.now() + 9 * 3600000) / 86400000) * 86400000 + 86400000 - 9 * 3600000;
 
-/** Three distinct ticket pools; the free daily single only exists in the normal pool. */
-type TicketType = 'normal' | 'sr' | 'ssr';
-const TICKET_TYPES: readonly TicketType[] = ['normal', 'sr', 'ssr'];
-const TICKET_LABEL: Record<TicketType, string> = { normal: '뽑기권', sr: 'SR 뽑기권', ssr: 'SSR 뽑기권' };
-const TICKET_GUARANTEE: Record<TicketType, string> = { normal: '기본 확률', sr: 'SR 이상 확정', ssr: 'SSR 이상 확정' };
+/** Four distinct wallets; the free daily single only exists in the normal pool. */
+export type TicketType = 'low' | 'normal' | 'sr' | 'ssr';
+const TICKET_TYPES: readonly TicketType[] = ['low', 'normal', 'sr', 'ssr'];
+export const TICKET_LABEL: Record<TicketType, string> = { low: '하급 뽑기권', normal: '일반 뽑기권', sr: 'SR 뽑기권', ssr: 'SSR 뽑기권' };
+const TICKET_GUARANTEE: Record<TicketType, string> = { low: '기본 확률 · UR 없음', normal: '기본 확률', sr: 'SR 이상 확정', ssr: 'SSR 이상 확정' };
+/** 하급 풀의 확정 확률(N 78 · R 20 · SR 1.9 · SSR 0.1). UR은 나오지 않는다. */
+const LOW_TICKET_WEIGHTS: Array<[Rarity, number]> = [['N', 0.78], ['R', 0.2], ['SR', 0.019], ['SSR', 0.001]];
+
+/** 등급별 등장 확률: 기본 가중치에서 그 지갑의 풀만 남기고 정규화한다. 천장은 쓰지 않는다. */
+function ticketOdds(type: TicketType): Array<[Rarity, number]> {
+  const pool = type === 'low' ? LOW_TICKET_WEIGHTS : RARITY_WEIGHTS;
+  const minimum: Rarity[] | null = type === 'sr' ? ['SR', 'SSR', 'UR'] : type === 'ssr' ? ['SSR', 'UR'] : null;
+  const allowed = pool.filter(([rarity]) => !minimum || minimum.includes(rarity));
+  const total = allowed.reduce((sum, [, weight]) => sum + weight, 0) || 1;
+  return RARITY_ORDER.map((rarity) => {
+    const entry = allowed.find(([item]) => item === rarity);
+    return [rarity, entry ? entry[1] / total : 0] as [Rarity, number];
+  });
+}
 /** Multipull tiers by affordable balance: 10 when you can, else 5, else single only. */
 const countOptions = (balance: number): Array<1 | 5 | 10> => (balance >= 10 ? [1, 10] : balance >= 5 ? [1, 5] : [1]);
-const ticketBalance = (snapshot: Snapshot, type: TicketType) => (type === 'normal' ? snapshot.credits : type === 'sr' ? snapshot.tickets.sr : snapshot.tickets.ssr);
+const ticketBalance = (snapshot: Snapshot, type: TicketType) =>
+  type === 'low' ? snapshot.tickets.low : type === 'normal' ? snapshot.credits : type === 'sr' ? snapshot.tickets.sr : snapshot.tickets.ssr;
 
 /** Reports what a coupon actually added, so the copy can never promise the wrong pool or count. */
 function couponGain(before: Snapshot, after: Snapshot): string {
   const parts: string[] = [];
   if (after.credits > before.credits) parts.push(`뽑기권 ${after.credits - before.credits}장`);
+  if (after.tickets.low > before.tickets.low) parts.push(`하급 뽑기권 ${after.tickets.low - before.tickets.low}장`);
   if (after.tickets.sr > before.tickets.sr) parts.push(`SR 뽑기권 ${after.tickets.sr - before.tickets.sr}장`);
   if (after.tickets.ssr > before.tickets.ssr) parts.push(`SSR 뽑기권 ${after.tickets.ssr - before.tickets.ssr}장`);
   return parts.length ? `${parts.join(' · ')}이 도착했어요.` : '쿠폰이 적용됐어요.';
@@ -74,6 +93,15 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
   const content = useRef<HTMLElement>(null);
   const inventory = useMemo(() => new Map(snapshot.inventory.map((item) => [item.cardId, item])), [snapshot.inventory]);
   const ownedCardIds = useMemo(() => snapshot.inventory.map((item) => item.cardId), [snapshot.inventory]);
+  /** 도감 완성률은 고유 원본 카드 기준: 합성·초월 카드도 같은 원본으로 센다. */
+  const ownedBase = useMemo(() => new Set(snapshot.inventory.map((row) => row.baseCardId || row.cardId)).size, [snapshot.inventory]);
+  /** 카탈로그 + 보유 변형. 같은 id면 보유 카드(유효등급·특성)가 이기고, 도감에 없는 변형은 뒤에 붙는다. */
+  const allCards = useMemo(() => {
+    const merged = new Map(cards.map((card) => [card.id, card]));
+    for (const row of snapshot.inventory) merged.set(row.card.id, row.card);
+    return [...merged.values()];
+  }, [cards, snapshot.inventory]);
+  const catalogCount = cards.length;
   const handleDecks = useCallback((decks: DeckSummary[]) => setSnapshot((current) => ({ ...current, decks })), []);
   const reportError = useCallback((message: string) => setFeedback({ text: message, error: true }), []);
 
@@ -184,6 +212,39 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
     } finally { inFlight.current = false; setBusy(false); }
   }
 
+  /**
+   * POST /api/progression. 미리보기는 쓰기 없이 소모 대상만 돌려주고, 실패는 Error로 던져
+   * 각 패널이 자기 자리에서 보여준다(상세 시트 안에서 전역 배너가 가려지는 일이 없다).
+   */
+  const progression = useCallback(async (body: ProgressionRequest, options?: { preview?: boolean }): Promise<ProgressionReply> => {
+    if (!user) throw new Error('로그인이 필요해요.');
+    if (inFlight.current) throw new Error('잠시 후 다시 시도해주세요.');
+    inFlight.current = true;
+    mutation.current += 1;
+    setBusy(true);
+    try {
+      let payload: ProgressionResponse | null = null;
+      let ok = false;
+      try {
+        const response = await fetch('/api/progression', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(options?.preview ? { ...body, preview: true } : body)
+        });
+        ok = response.ok;
+        payload = await response.json().catch(() => null) as ProgressionResponse | null;
+      } catch {
+        throw new Error('연결을 확인한 뒤 다시 시도해주세요.');
+      }
+      if (!ok || !payload) throw new Error(payload?.error || '요청을 처리하지 못했어요. 잠시 후 다시 시도해주세요.');
+      if (payload.snapshot) setSnapshot(payload.snapshot);
+      return { message: payload.message ?? '', preview: payload.preview };
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }, [user]);
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#content">본문으로 건너뛰기</a>
@@ -201,24 +262,43 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
       <main id="content" ref={content} tabIndex={-1} className="page">
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.div key={tab} className="view-stage" initial={{ opacity: 0, y: reduced ? 0 : 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ ...gentleSpring, opacity: { duration: 0.12 } }}>
-            {tab === 'home' && <HomeView user={user} snapshot={snapshot} cards={cards} onNavigate={navigate} onOpen={setSelected} />}
+            {tab === 'home' && <HomeView user={user} snapshot={snapshot} cards={allCards} catalogCount={catalogCount} ownedBase={ownedBase} onNavigate={navigate} onOpen={setSelected} />}
             {tab === 'pull' && <PullView user={user} snapshot={snapshot} count={count} onCount={setCount} ticketType={ticketType} onTicketType={setTicketType} busy={busy} results={results} pullId={pullId} onPull={pull} onOpen={setSelected} onNavigate={navigate} />}
-            {tab === 'collection' && <CollectionView user={user} snapshot={snapshot} cards={cards} filter={filter} onFilter={setFilter} onOpen={setSelected} onNavigate={navigate} />}
-            {tab === 'deck' && <Suspense fallback={<ViewLoading label="덱을 불러오고 있어요." />}><DeckView user={user} decks={snapshot.decks} ownedCardIds={ownedCardIds} cards={cards} busy={busy} onDecksChange={handleDecks} onOpenCard={setSelected} onError={reportError} /></Suspense>}
-            {tab === 'battle' && <Suspense fallback={<ViewLoading label="대련 준비 중이에요." />}><BattleView user={user} decks={snapshot.decks} cards={cards} daily={snapshot.daily} unlockedModes={snapshot.unlockedModes} clearedByMode={snapshot.clearedByMode} inventory={snapshot.inventory} onStateChange={refresh} onNavigate={(next) => { if (isTab(next)) navigate(next); }} onOpenCard={setSelected} onError={reportError} /></Suspense>}
-            {tab === 'stats' && <StatsView user={user} snapshot={snapshot} cards={cards} onOpenCard={setSelected} />}
+            {tab === 'collection' && <CollectionView user={user} snapshot={snapshot} cards={allCards} catalogCount={catalogCount} ownedBase={ownedBase} filter={filter} onFilter={setFilter} onOpen={setSelected} onNavigate={navigate} />}
+            {tab === 'growth' && <GrowthView user={user} snapshot={snapshot} run={progression} busy={busy} onOpenCard={setSelected} />}
+            {tab === 'deck' && <Suspense fallback={<ViewLoading label="덱을 불러오고 있어요." />}><DeckView user={user} decks={snapshot.decks} ownedCardIds={ownedCardIds} cards={allCards} inventory={snapshot.inventory} busy={busy} onDecksChange={handleDecks} onOpenCard={setSelected} onError={reportError} /></Suspense>}
+            {tab === 'battle' && <Suspense fallback={<ViewLoading label="대련 준비 중이에요." />}><BattleView user={user} decks={snapshot.decks} cards={allCards} daily={snapshot.daily} unlockedModes={snapshot.unlockedModes} clearedByMode={snapshot.clearedByMode} inventory={snapshot.inventory} onStateChange={refresh} onNavigate={(next) => { if (isTab(next)) navigate(next); }} onOpenCard={setSelected} onError={reportError} /></Suspense>}
+            {tab === 'stats' && <StatsView user={user} snapshot={snapshot} cards={allCards} onOpenCard={setSelected} />}
             {tab === 'coupon' && <CouponView user={user} busy={busy} feedback={feedback} onSubmit={redeem} onNavigate={navigate} />}
           </motion.div>
         </AnimatePresence>
         {feedback && tab !== 'coupon' && <p className={`feedback ${feedback.error ? 'error' : 'success'}`} role={feedback.error ? 'alert' : 'status'}><Icon name={feedback.error ? 'clock' : 'check'} />{feedback.text}</p>}
       </main>
-      <footer className="footer"><span>limketmon. <span>이 정도면 우정입니다.</span></span><span>ORIGINAL COLLECTION · {cards.length} CARDS</span></footer>
-      <AnimatePresence>{selected && <CardDetail key={selected.id} card={selected} quantity={inventory.get(selected.id)?.quantity ?? 0} enhanceLevel={inventory.get(selected.id)?.enhanceLevel ?? 0} obtainedAt={inventory.get(selected.id)?.firstObtainedAt} onEnhance={user ? enhance : undefined} enhancing={busy} onClose={() => setSelected(null)} />}</AnimatePresence>
+      <footer className="footer"><span>limketmon. <span>이 정도면 우정입니다.</span></span><span>ORIGINAL COLLECTION · {catalogCount} CARDS</span></footer>
+      <AnimatePresence>{selected && <CardDetail
+        key={selected.id}
+        card={selected}
+        quantity={inventory.get(selected.id)?.quantity ?? 0}
+        materialCount={materialsOf(inventory.get(selected.id), snapshot.inventory)}
+        enhanceLevel={inventory.get(selected.id)?.enhanceLevel ?? 0}
+        obtainedAt={inventory.get(selected.id)?.firstObtainedAt}
+        progress={inventory.get(selected.id)}
+        growth={user && inventory.get(selected.id) ? (
+          <div className="growth-panels">
+            <TraitPanel card={selected} row={inventory.get(selected.id)!} materials={snapshot.materials} run={progression} busy={busy} />
+            <TranscendPanel card={selected} row={inventory.get(selected.id)!} materials={snapshot.materials} run={progression} busy={busy} />
+            <DismantlePanel card={selected} row={inventory.get(selected.id)!} run={progression} busy={busy} />
+          </div>
+        ) : undefined}
+        onEnhance={user ? enhance : undefined}
+        enhancing={busy}
+        onClose={() => setSelected(null)}
+      />}</AnimatePresence>
     </div>
   );
 }
 
-function HomeView({ user, snapshot, cards, onNavigate, onOpen }: { user: User; snapshot: Snapshot; cards: Card[]; onNavigate: (tab: Tab) => void; onOpen: (card: Card) => void }) {
+function HomeView({ user, snapshot, cards, catalogCount, ownedBase, onNavigate, onOpen }: { user: User; snapshot: Snapshot; cards: Card[]; catalogCount: number; ownedBase: number; onNavigate: (tab: Tab) => void; onOpen: (card: Card) => void }) {
   const reduced = useReducedMotion();
   const showcase = [9, 7, 1].map((version) => cards.find((card) => card.version === version)!).filter(Boolean);
   const recent = selectCards(cards, snapshot.inventory, { ...defaultFilter, ownership: 'owned', sort: 'recent' }).slice(0, 4);
@@ -230,22 +310,22 @@ function HomeView({ user, snapshot, cards, onNavigate, onOpen }: { user: User; s
         <h1 id="discovery-title">임신규<br /><span>카드 도감</span></h1>
         <p className="hero-description">사진첩에만 두기 아까운 표정들.<br />굳이 카드로 만들어봤습니다.</p>
         <div className="hero-actions"><motion.button className="btn btn-primary" onClick={() => onNavigate('pull')} whileTap={{ scale: 0.97 }}>{user && snapshot.freeAvailable ? '오늘의 무료 카드 열기' : '카드팩 열기'}<Icon name="arrow" /></motion.button><button className="text-button" onClick={() => onNavigate('collection')}>도감 둘러보기<Icon name="chevron" /></button></div>
-        <p className="hero-note"><Icon name="sparkle" />매일 한 장 무료 · {cards.length}종의 임신규</p>
+        <p className="hero-note"><Icon name="sparkle" />매일 한 장 무료 · {catalogCount}종의 임신규</p>
       </div>
       <div className="hero-gallery" aria-label="컬렉션 미리보기">{showcase.map((card, index) => <motion.div key={card.id} className={`hero-card hero-card-${index}`} initial={reduced ? false : { opacity: 0, y: 35, rotate: 0 }} animate={{ opacity: 1, y: 0, rotate: [-13, 3, 16][index] }} transition={{ ...gentleSpring, delay: reduced ? 0 : index * 0.08 }}><CardButton card={card} onClick={() => onOpen(card)} priority /></motion.div>)}
-        <div className="gallery-caption"><span className="tiny-cross">+</span>본인도 이 사진이 여기 있는지 모를 수 있음.<span>01 — {cards.length}</span></div>
+        <div className="gallery-caption"><span className="tiny-cross">+</span>본인도 이 사진이 여기 있는지 모를 수 있음.<span>01 — {catalogCount}</span></div>
       </div>
     </section>
-    {user ? <section className="collector-strip" aria-label="나의 수집 현황"><div className="collector-identity"><span className="avatar">{Array.from(user.displayName)[0]}</span><div><span className="meta-label">MY COLLECTION</span><strong>{user.displayName}</strong></div></div><div><span className="meta-label">발견한 카드</span><strong>{snapshot.inventory.length}<small> / {cards.length}</small></strong></div><div><span className="meta-label">모은 카드</span><strong>{totalOwned}<small> 장</small></strong></div><button className="daily-status" onClick={() => onNavigate('pull')}><span className="status-dot" data-ready={snapshot.freeAvailable} />{snapshot.freeAvailable ? '무료 팩이 기다리고 있어요' : '오늘의 무료 팩 개봉 완료'}<Icon name="arrow" /></button></section> : <section className="welcome-strip"><span><Icon name="sparkle" /><strong>신규 수집에 동참하시겠어요?</strong><span>로그인하면 카드가 내 도감에 차곡차곡.</span></span><a href={signIn('pull')}>ChatGPT로 시작하기<Icon name="arrow" /></a></section>}
+    {user ? <section className="collector-strip" aria-label="나의 수집 현황"><div className="collector-identity"><span className="avatar">{Array.from(user.displayName)[0]}</span><div><span className="meta-label">MY COLLECTION</span><strong>{user.displayName}</strong></div></div><div><span className="meta-label">발견한 카드</span><strong>{ownedBase}<small> / {catalogCount}</small></strong></div><div><span className="meta-label">모은 카드</span><strong>{totalOwned}<small> 장</small></strong></div><button className="daily-status" onClick={() => onNavigate('pull')}><span className="status-dot" data-ready={snapshot.freeAvailable} />{snapshot.freeAvailable ? '무료 팩이 기다리고 있어요' : '오늘의 무료 팩 개봉 완료'}<Icon name="arrow" /></button></section> : <section className="welcome-strip"><span><Icon name="sparkle" /><strong>신규 수집에 동참하시겠어요?</strong><span>로그인하면 카드가 내 도감에 차곡차곡.</span></span><a href={signIn('pull')}>ChatGPT로 시작하기<Icon name="arrow" /></a></section>}
     <section className="battle-deck" aria-labelledby="home-battle-title">
       <div className="battle-deck-head"><h2 id="home-battle-title">카드 3장으로 대련.</h2><p className="deck-hint"><Icon name={snapshot.daily.cleared ? 'check' : 'sparkle'} />{snapshot.daily.cleared ? '오늘의 도전 완료' : '오늘의 도전 열림'}</p></div>
       <p className="deck-note">오늘의 도전 · {snapshot.daily.title} · {snapshot.daily.ruleLabel} · 이기면 뽑기권 {snapshot.daily.rewardCredits}장</p>
       <div className="hero-actions"><motion.button className="btn btn-primary" onClick={() => onNavigate('battle')} whileTap={{ scale: 0.97 }}>{snapshot.daily.cleared ? '대련 계속하기' : '오늘의 도전 하러 가기'}<Icon name="arrow" /></motion.button><button className="text-button" onClick={() => onNavigate('deck')}>전투 덱 편집<Icon name="chevron" /></button></div>
     </section>
     <section className="home-collection" aria-labelledby="home-collection-title"><div className="section-head"><div><p className="eyebrow">{recent.length ? 'RECENTLY COLLECTED' : 'CAUGHT ON CAMERA'}</p><h2 id="home-collection-title">{recent.length ? '방금 잡은 신규들' : '이런 신규는 어때요?'}</h2></div><button className="text-button" onClick={() => onNavigate('collection')}>전체 도감<Icon name="arrow" /></button></div>
-      <div className="featured-grid">{featured.map((card) => <div className="gallery-item" key={card.id}><CardButton card={card} quantity={snapshot.inventory.find((item) => item.cardId === card.id)?.quantity} onClick={() => onOpen(card)} /><div className="gallery-item-caption"><span>{cardTitle(card)}</span><span className={`rarity-text rarity-${card.rarity}`}>{card.rarity}</span></div></div>)}</div>
+      <div className="featured-grid">{featured.map((card) => <div className="gallery-item" key={card.id}><CardButton card={card} quantity={snapshot.inventory.find((item) => item.cardId === card.id)?.quantity} materialCount={materialsOf(snapshot.inventory.find((item) => item.cardId === card.id), snapshot.inventory)} onClick={() => onOpen(card)} /><div className="gallery-item-caption"><span>{cardTitle(card)}</span><span className={`rarity-text rarity-${card.rarity}`}>{card.rarity}</span></div></div>)}</div>
     </section>
-    <section className="collection-invite"><div><span className="eyebrow">SAME GUY. DIFFERENT PROBLEM.</span><h2>아직 안 본 신규가 있다면.</h2><p>{user ? `${cards.length - snapshot.inventory.length}종의 신규가 아직 안 잡혔습니다.` : '표정은 제각각. 아무튼 전부 같은 사람.'}</p></div><button className="btn btn-dark" onClick={() => onNavigate(user ? 'pull' : 'collection')}>{user ? '신규 한 장 더 뽑기' : `${cards.length}종의 신규 보기`}<Icon name="arrow" /></button></section>
+    <section className="collection-invite"><div><span className="eyebrow">SAME GUY. DIFFERENT PROBLEM.</span><h2>아직 안 본 신규가 있다면.</h2><p>{user ? `${Math.max(0, catalogCount - ownedBase)}종의 신규가 아직 안 잡혔습니다.` : '표정은 제각각. 아무튼 전부 같은 사람.'}</p></div><button className="btn btn-dark" onClick={() => onNavigate(user ? 'pull' : 'collection')}>{user ? '신규 한 장 더 뽑기' : `${catalogCount}종의 신규 보기`}<Icon name="arrow" /></button></section>
   </>;
 }
 
@@ -280,30 +360,13 @@ function PullView({ user, snapshot, count, onCount, ticketType, onTicketType, bu
   const canPull = count === 1 ? balance >= 1 || freeSingle : balance >= count;
   const cost = count === 1 && freeSingle ? '무료' : `${TICKET_LABEL[ticketType]} ${count}장`;
   const newCount = results.filter((result) => result.isNew).length;
-  const oddsTable = useMemo(() => {
-    if (ticketType === 'ssr') {
-      const allowed: Rarity[] = ['SSR', 'UR'];
-      const pool = RARITY_WEIGHTS.filter(([r]) => allowed.includes(r));
-      const total = pool.reduce((sum, [, w]) => sum + w, 0);
-      return new Map(RARITY_ORDER.map((r) => [r, allowed.includes(r) ? (pool.find(([item]) => item === r)?.[1] ?? 0) / total : 0]));
-    }
-    if (ticketType === 'sr') {
-      const allowed: Rarity[] = ['SR', 'SSR', 'UR'];
-      const pool = RARITY_WEIGHTS.filter(([r]) => allowed.includes(r));
-      const total = pool.reduce((sum, [, w]) => sum + w, 0);
-      return new Map(RARITY_ORDER.map((r) => [r, allowed.includes(r) ? (pool.find(([item]) => item === r)?.[1] ?? 0) / total : 0]));
-    }
-    const counter = Math.max(0, HARD_PITY_AT - snapshot.pityRemaining);
-    // The 60th pull bypasses the soft-pity table for a flat UR/SSR split; show that draw, not the
-    // soft-pity numbers the player will never roll against.
-    if (isHardPity(counter)) return new Map(hardPityOdds());
-    return new Map(pityOdds(counter));
-  }, [ticketType, snapshot.pityRemaining]);
+  // 천장은 없다: 지갑별 기본 가중치만 그대로 보여준다. XR은 어떤 지갑에서도 0%다.
+  const oddsTable = useMemo(() => new Map(ticketOdds(ticketType)), [ticketType]);
   return <section className="pull-view" aria-labelledby="pull-title">
     <div className="section-head"><div><p className="eyebrow">DAILY DOSE OF SINGYU</p><h1 id="pull-title">오늘의 신규깡.</h1></div><span className="edition-label">ORIGINALS / VOL. 01</span></div>
     <div className="pull-layout"><div className={`opening-table ${results.length ? 'has-results' : ''}`}>
       <div className="table-label"><Icon name="sparkle" />{results.length ? 'LOOK WHO SHOWED UP' : 'SPOILER: IT’S SINGYU'}</div>
-      {results.length ? <RevealDeck key={pullId} results={results} onOpen={onOpen} /> : <div className="sealed-deck">
+      {results.length ? <RevealDeck key={pullId} results={results} inventory={snapshot.inventory} onOpen={onOpen} /> : <div className="sealed-deck">
         <motion.div className="deck-layer layer-two" animate={{ rotate: busy && !reduced ? 9 : 6, x: busy && !reduced ? 20 : 10, y: 4 }} transition={spring}><CardBack count={count} /></motion.div>
         <motion.div className="deck-layer layer-one" animate={{ rotate: busy && !reduced ? -8 : -5, x: busy && !reduced ? -16 : -7, y: 2 }} transition={spring}><CardBack count={count} /></motion.div>
         <motion.button className="sealed-front" disabled={busy || (!!user && !canPull)} aria-label={busy ? '카드를 불러오는 중' : '선택한 카드팩 열기'} onClick={() => { if (user) onPull(); else window.location.assign(signIn('pull')); }} animate={busy && !reduced ? { y: -12, scale: 0.98 } : { y: 0, scale: 1 }} whileHover={reduced || busy ? undefined : { y: -9, rotate: -2 }} whileTap={reduced ? undefined : { scale: 0.96 }} transition={spring}><CardBack count={count} /></motion.button>
@@ -314,7 +377,7 @@ function PullView({ user, snapshot, count, onCount, ticketType, onTicketType, bu
         const typeBalance = ticketBalance(snapshot, type);
         const free = type === 'normal' && snapshot.freeAvailable;
         return <button key={type} className="ticket-chip" aria-pressed={ticketType === type} disabled={busy} onClick={() => onTicketType(type)}>
-          <span className="ticket-name">{type === 'normal' ? '일반 뽑기권' : TICKET_LABEL[type]}</span>
+          <span className="ticket-name">{TICKET_LABEL[type]}</span>
           <strong>{user ? (free ? `무료 1회 · ${typeBalance}장` : `${typeBalance}장`) : '로그인 후'}</strong>
           <small>{TICKET_GUARANTEE[type]}</small>
         </button>;
@@ -322,14 +385,14 @@ function PullView({ user, snapshot, count, onCount, ticketType, onTicketType, bu
       <div className={`pack-selector ${options.length === 1 ? 'single' : ''}`} aria-label="뽑기 수량">{options.map((value) => <button key={value} aria-pressed={count === value} disabled={busy} onClick={() => onCount(value)}>{count === value && <motion.span className="pack-selection" layoutId="pack-count" />}<span><strong>{value === 1 ? '1장 뽑기' : `${value}장 뽑기`}</strong><small>{value === 1 ? (freeSingle ? '오늘 1회 무료' : `${TICKET_LABEL[ticketType]} 1장`) : `${TICKET_LABEL[ticketType]} ${value}장`}</small></span>{value === count && <Icon name="check" />}</button>)}</div>
       {user ? <motion.button className="btn btn-primary open-pack-button" disabled={busy || !canPull} onClick={onPull} whileTap={{ scale: 0.98 }}>{busy ? '카드 확인 중…' : results.length ? `새 팩 열기 · ${cost}` : `팩 열기 · ${cost}`}<Icon name="arrow" /></motion.button> : <a className="btn btn-primary open-pack-button" href={signIn('pull')}>로그인하고 무료로 열기<Icon name="arrow" /></a>}
       {user && !canPull && !busy && <p className="insufficient">뽑기권이 부족해요. <button onClick={() => onNavigate('coupon')}>쿠폰 입력하기<Icon name="arrow" /></button></p>}
-      <div className="pack-balance"><span>일반 뽑기권 <strong>{user ? `${snapshot.credits}장` : '로그인 후 확인'}</strong></span><span>SR 뽑기권 <strong>{user ? `${snapshot.tickets.sr}장` : '—'}</strong></span><span>SSR 뽑기권 <strong>{user ? `${snapshot.tickets.ssr}장` : '—'}</strong></span><span><Icon name="clock" /><ResetClock /></span></div>
-      <details className="odds"><summary>카드 등장 확률<span>확인하기 +</span></summary><div>{RARITY_ORDER.map((rarity) => <div key={rarity}><span className={`rarity-text rarity-${rarity}`}>{rarity}</span><strong>{Math.round((oddsTable.get(rarity) ?? 0) * 100)}%</strong></div>)}</div>{ticketType === 'normal' ? <p>천장까지 {snapshot.pityRemaining}회 (30회부터 SSR+ 확률 점진 증가, 60회 시 확정). 여러 장 뽑기에는 무료 횟수가 사용되지 않습니다.</p> : <p>{TICKET_GUARANTEE[ticketType]} 확정 · {TICKET_LABEL[ticketType]}. 일반 뽑기의 천장 카운터에는 영향을 주지 않습니다.</p>}</details>
+      <div className="pack-balance"><span>하급 뽑기권 <strong>{user ? `${snapshot.tickets.low}장` : '로그인 후 확인'}</strong></span><span>일반 뽑기권 <strong>{user ? `${snapshot.credits}장` : '—'}</strong></span><span>SR 뽑기권 <strong>{user ? `${snapshot.tickets.sr}장` : '—'}</strong></span><span>SSR 뽑기권 <strong>{user ? `${snapshot.tickets.ssr}장` : '—'}</strong></span><span><Icon name="clock" /><ResetClock /></span></div>
+      <details className="odds"><summary>카드 등장 확률<span>확인하기 +</span></summary><div>{RARITY_ORDER.map((rarity) => <div key={rarity}><span className={`rarity-text rarity-${rarity}`}>{rarity}</span><strong>{Math.round((oddsTable.get(rarity) ?? 0) * 1000) / 10}%</strong></div>)}</div>{ticketType === 'low' ? <p>하급 뽑기권은 대련 승리로 모입니다. UR은 나오지 않고, 10장 뽑기에도 무료 횟수는 쓰이지 않습니다.</p> : ticketType === 'sr' || ticketType === 'ssr' ? <p>{TICKET_GUARANTEE[ticketType]} 확정 · {TICKET_LABEL[ticketType]}. 일반 뽑기와 지갑이 따로입니다.</p> : <p>매일 첫 1장은 무료입니다. 여러 장 뽑기에는 무료 횟수가 사용되지 않습니다.</p>}</details>
     </aside></div>
     {!!results.length && <div className="result-actions"><p><Icon name="check" />모든 카드는 이미 도감에 안전하게 저장됐어요.</p><button className="text-button" onClick={() => onNavigate('collection')}>도감에서 보기<Icon name="arrow" /></button></div>}
   </section>;
 }
 
-function RevealDeck({ results, onOpen }: { results: PullResult[]; onOpen: (card: Card) => void }) {
+function RevealDeck({ results, inventory, onOpen }: { results: PullResult[]; inventory: Snapshot['inventory']; onOpen: (card: Card) => void }) {
   const reduced = useReducedMotion();
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState<Set<number>>(() => new Set());
@@ -351,7 +414,7 @@ function RevealDeck({ results, onOpen }: { results: PullResult[]; onOpen: (card:
     setIndex(next);
   }
 
-  if (all) return <div className={`all-results ${results.length === 1 ? 'one-result' : ''}`}>{results.map((item, i) => <motion.div key={i} className="result-thumbnail" initial={{ opacity: 0, y: reduced ? 0 : 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...gentleSpring, delay: reduced ? 0 : i * 0.055 }}><CardButton card={item.card} quantity={item.quantity} onClick={() => onOpen(item.card)} />{item.isNew && <span className="new-label">NEW</span>}</motion.div>)}</div>;
+  if (all) return <div className={`all-results ${results.length === 1 ? 'one-result' : ''}`}>{results.map((item, i) => <motion.div key={i} className="result-thumbnail" initial={{ opacity: 0, y: reduced ? 0 : 12 }} animate={{ opacity: 1, y: 0 }} transition={{ ...gentleSpring, delay: reduced ? 0 : i * 0.055 }}><CardButton card={item.card} quantity={item.quantity} materialCount={materialsOf({ cardId: item.card.id, quantity: item.quantity, baseCardId: item.card.baseCardId ?? item.card.id }, inventory)} onClick={() => onOpen(item.card)} />{item.isNew && <span className="new-label">NEW</span>}</motion.div>)}</div>;
 
   return <div className="reveal-experience"><div className="reveal-deck">
     {index < results.length - 1 && <div className="reveal-under"><CardBack /></div>}
@@ -363,36 +426,58 @@ function RevealDeck({ results, onOpen }: { results: PullResult[]; onOpen: (card:
       <motion.button className={`flip-card ${faceUp ? 'is-revealed' : ''}`} aria-label={faceUp ? `${cardTitle(result.card)} 상세 보기` : `${index + 1}번째 카드 뒤집기`} onClick={() => faceUp ? onOpen(result.card) : reveal()} whileTap={reduced ? undefined : { scale: 0.97 }}>
         <motion.div className="flip-inner" animate={{ rotateY: reduced ? 0 : faceUp ? 180 : 0 }} transition={{ type: 'spring', stiffness: 130, damping: 22, mass: 0.8 }}>
           <div className="flip-back" aria-hidden={faceUp} style={reduced ? { display: faceUp ? 'none' : 'block' } : undefined}><CardBack /></div>
-          <div className="flip-front" aria-hidden={!faceUp} style={reduced ? { display: faceUp ? 'block' : 'none', transform: 'none' } : undefined}><CardArtwork card={result.card} quantity={result.quantity} priority interactive /></div>
+          <div className="flip-front" aria-hidden={!faceUp} style={reduced ? { display: faceUp ? 'block' : 'none', transform: 'none' } : undefined}><CardArtwork card={result.card} quantity={result.quantity} materialCount={materialsOf({ cardId: result.card.id, quantity: result.quantity, baseCardId: result.card.baseCardId ?? result.card.id }, inventory)} priority interactive /></div>
         </motion.div>
       </motion.button>
       {faceUp && result.isNew && <motion.span className="new-label" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>NEW DISCOVERY</motion.span>}
     </motion.div>
-  </div><div className="reveal-caption" aria-live="polite"><strong>{faceUp ? cardTitle(result.card) : '어떤 카드일까요?'}</strong><span>{faceUp ? `${result.card.rarity} · ${result.isNew ? '새로운 신규 포착' : `강화 재료 ${enhanceMaterials(result.quantity)}장`}` : '카드를 눌러 뒤집어보세요'}</span></div>
+  </div><div className="reveal-caption" aria-live="polite"><strong>{faceUp ? cardTitle(result.card) : '어떤 카드일까요?'}</strong><span>{faceUp ? `${result.card.rarity} · ${result.isNew ? '새로운 신규 포착' : `강화 재료 ${materialsOf({ cardId: result.card.id, quantity: result.quantity, baseCardId: result.card.baseCardId ?? result.card.id }, inventory)}장`}` : '카드를 눌러 뒤집어보세요'}</span></div>
     <div className="deck-controls"><button className="icon-button" disabled={index === 0} onClick={() => void advance(-1)} aria-label="이전 카드"><Icon name="back" /></button><span>{index + 1}<small> / {results.length}</small></span><button className="icon-button" disabled={index === results.length - 1} onClick={() => void advance(1)} aria-label="다음 카드"><Icon name="arrow" /></button></div>
     <button className="text-button reveal-all" onClick={() => setAll(true)}>{results.length > 1 ? '한 번에 모두 보기' : '카드 바로 보기'}<Icon name="grid" /></button>
   </div>;
 }
 
-function CollectionView({ user, snapshot, cards, filter, onFilter, onOpen, onNavigate }: { user: User; snapshot: Snapshot; cards: Card[]; filter: CollectionFilter; onFilter: (filter: CollectionFilter) => void; onOpen: (card: Card) => void; onNavigate: (tab: Tab) => void }) {
+function CollectionView({ user, snapshot, cards, catalogCount, ownedBase, filter, onFilter, onOpen, onNavigate }: { user: User; snapshot: Snapshot; cards: Card[]; catalogCount: number; ownedBase: number; filter: CollectionFilter; onFilter: (filter: CollectionFilter) => void; onOpen: (card: Card) => void; onNavigate: (tab: Tab) => void }) {
   const inventory = useMemo(() => new Map(snapshot.inventory.map((item) => [item.cardId, item])), [snapshot.inventory]);
   const visible = useMemo(() => selectCards(cards, snapshot.inventory, filter), [cards, snapshot.inventory, filter]);
   function change(patch: Partial<CollectionFilter>) { onFilter({ ...filter, ...patch }); }
   return <section className="collection-view" aria-labelledby="collection-title">
-    <header className="section-head"><div><p className="eyebrow">THE COMPLETE ARCHIVE</p><h1 id="collection-title">임신규 관찰 도감.</h1><p>{user ? '한 사람을 이렇게까지 모아봅니다.' : `${cards.length}종의 임신규. 표정만 봐도 등급이 궁금해집니다.`}</p></div><div className="completion-number"><strong>{user ? snapshot.inventory.length : cards.length}</strong><span>/ {cards.length}<small>{user ? '수집한 카드' : '전체 카드'}</small></span></div></header>
+    <header className="section-head"><div><p className="eyebrow">THE COMPLETE ARCHIVE</p><h1 id="collection-title">임신규 관찰 도감.</h1><p>{user ? '한 사람을 이렇게까지 모아봅니다.' : `${catalogCount}종의 임신규. 표정만 봐도 등급이 궁금해집니다.`}</p></div><div className="completion-number"><strong>{user ? ownedBase : catalogCount}</strong><span>/ {catalogCount}<small>{user ? '수집한 카드' : '전체 카드'}</small></span></div></header>
     {user && <div className="archive-progress"><div role="progressbar" aria-label="도감 완성도" aria-valuenow={snapshot.completion} aria-valuemin={0} aria-valuemax={100}><motion.span animate={{ scaleX: snapshot.completion / 100 }} /></div><span>{snapshot.completion}% 완성</span></div>}
-    <div className="collection-toolbar"><div className="ownership-filter" aria-label="수집 상태">{([['all', '전체'], ['owned', '수집한 카드'], ['missing', '아직 못 만난 카드']] as const).map(([value, label]) => <button key={value} disabled={!user && value !== 'all'} aria-pressed={filter.ownership === value} onClick={() => change({ ownership: value })}>{label}{value === 'owned' && user && <span>{snapshot.inventory.length}</span>}</button>)}</div><label className="search-field"><Icon name="search" /><span className="sr-only">카드 이름, 번호, 스킬 검색</span><input type="search" value={filter.query} onChange={(event) => change({ query: event.target.value })} placeholder="이름, 번호, 스킬 검색" /></label></div>
+    <div className="collection-toolbar"><div className="ownership-filter" aria-label="수집 상태">{([['all', '전체'], ['owned', '수집한 카드'], ['missing', '아직 못 만난 카드']] as const).map(([value, label]) => <button key={value} disabled={!user && value !== 'all'} aria-pressed={filter.ownership === value} onClick={() => change({ ownership: value })}>{label}{value === 'owned' && user && <span>{ownedBase}</span>}</button>)}</div><label className="search-field"><Icon name="search" /><span className="sr-only">카드 이름, 번호, 스킬 검색</span><input type="search" value={filter.query} onChange={(event) => change({ query: event.target.value })} placeholder="이름, 번호, 스킬 검색" /></label></div>
     <div className="filter-row"><div className="rarity-filters" aria-label="등급 필터"><button aria-pressed={filter.rarity === 'all'} onClick={() => change({ rarity: 'all' })}>모든 등급</button>{RARITY_ORDER.map((rarity) => <button key={rarity} className={`rarity-${rarity}`} aria-pressed={filter.rarity === rarity} onClick={() => change({ rarity })}><i />{rarity}</button>)}</div><label className="sort-select"><span className="sr-only">정렬</span><select value={filter.sort} onChange={(event) => change({ sort: event.target.value as CollectionFilter['sort'] })}><option value="rarity">희귀도순</option><option value="number">번호순</option>{user && <option value="recent">최근 수집순</option>}</select></label></div>
     <p className="results-count" role="status">{visible.length}개의 카드{filter.query && ` · “${filter.query}” 검색 결과`}</p>
     {visible.length ? <div className="archive-grid">{visible.map((card) => {
       const owned = inventory.get(card.id);
-      return <div key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`}><CardButton card={card} quantity={owned?.quantity} enhanceLevel={owned?.enhanceLevel} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong><span>{owned ? <><Icon name="check" />보유 중 · 강화 재료 {enhanceMaterials(owned.quantity)}장{owned.enhanceLevel ? ' · +' + owned.enhanceLevel : ''}</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></div>;
+      return <div key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`}><CardButton card={card} quantity={owned?.quantity} materialCount={materialsOf(owned, snapshot.inventory)} enhanceLevel={owned?.enhanceLevel} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong>{owned && <CardBadges card={card} progress={owned} />}<span>{owned ? <><Icon name="check" />보유 중 · 강화 재료 {materialsOf(owned, snapshot.inventory)}장{owned.enhanceLevel ? ' · +' + owned.enhanceLevel : ''}</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></div>;
     })}</div> : <div className="empty-state"><Icon name="search" /><h2>{filter.ownership === 'owned' && !snapshot.inventory.length ? '아직 잡힌 신규가 없어요.' : '해당하는 카드가 없어요.'}</h2><p>{filter.ownership === 'owned' && !snapshot.inventory.length ? '오늘의 무료 팩에서 첫 신규를 잡아보세요.' : '다른 검색어를 쓰거나 필터를 바꿔보세요.'}</p><button className="btn btn-dark" onClick={() => { if (filter.ownership === 'owned' && !snapshot.inventory.length) onNavigate('pull'); else onFilter(defaultFilter); }}>{filter.ownership === 'owned' && !snapshot.inventory.length ? '무료 카드 열기' : '필터 초기화'}<Icon name="arrow" /></button></div>}
   </section>;
 }
 
 function CouponView({ user, busy, feedback, onSubmit, onNavigate }: { user: User; busy: boolean; feedback: Feedback; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onNavigate: (tab: Tab) => void }) {
-  return <section className="coupon-view" aria-labelledby="coupon-title"><div className="section-head"><div><p className="eyebrow">MORE PULLS. SAME GUY.</p><h1 id="coupon-title">뽑을 핑계, 여기 있습니다.</h1><p>뽑기권이 없어서 못 놀리는 일은 없도록.</p></div></div><div className="coupon-layout"><div className="welcome-ticket"><span className="eyebrow">WELCOME TO THE SINGYU CLUB</span><div className="ticket-value">100<span>장의<br />신규 소환권</span></div><p>처음 오셨으니 100장 드립니다.</p><div className="ticket-code"><span>WELCOME CODE</span><strong>LIMKETMON</strong><Icon name="ticket" /></div><span className="ticket-footnote">계정당 1회 · 뽑기권 100장</span></div><div className="coupon-form-panel"><Icon name="ticket" /><h2>신규 소환권 충전소.</h2><p>가지고 있는 쿠폰 코드를 입력해주세요.</p>{user ? <form onSubmit={onSubmit}><label htmlFor="coupon-code">쿠폰 코드</label><input id="coupon-code" name="code" placeholder="LIMKETMON" maxLength={64} required autoComplete="off" autoCapitalize="characters" spellCheck={false} /><button className="btn btn-primary" disabled={busy}>{busy ? '쿠폰 확인 중…' : '뽑기권 받기'}<Icon name="arrow" /></button></form> : <a className="btn btn-primary" href={signIn('coupon')}>로그인하고 선물 받기<Icon name="arrow" /></a>}{feedback && <div className={`feedback ${feedback.error ? 'error' : 'success'}`} role={feedback.error ? 'alert' : 'status'}><Icon name={feedback.error ? 'clock' : 'check'} /><span>{feedback.text}{!feedback.error && <button className="text-button" onClick={() => onNavigate('pull')}>카드팩 열러 가기<Icon name="arrow" /></button>}</span></div>}<p className="coupon-note">받은 뽑기권은 내 계정에 저장됩니다.<br />이미 사용한 쿠폰은 다시 사용할 수 없어요.</p></div></div></section>;
+  return <section className="coupon-view" aria-labelledby="coupon-title">
+    <div className="section-head"><div><p className="eyebrow">MORE PULLS. SAME GUY.</p><h1 id="coupon-title">뽑을 핑계, 여기 있습니다.</h1><p>뽑기권이 없어서 못 놀리는 일은 없도록.</p></div></div>
+    <div className="coupon-layout">
+      <div className="welcome-ticket">
+        <span className="eyebrow">WELCOME TO THE SINGYU CLUB</span>
+        <div className="ticket-value">3<span>종의<br />신규 소환권</span></div>
+        <p>처음 오셨으니 세 가지 뽑기권을 한 번에 드립니다.</p>
+        <ul className="ticket-grants">
+          <li><span>SSR 뽑기권</span><strong>1장</strong></li>
+          <li><span>일반 뽑기권</span><strong>10장</strong></li>
+          <li><span>하급 뽑기권</span><strong>50장</strong></li>
+        </ul>
+        <div className="ticket-code"><span>WELCOME CODE</span><strong>LIMKETMON</strong><Icon name="ticket" /></div>
+        <span className="ticket-footnote">계정당 1회 · SSR 뽑기권 1장 + 일반 뽑기권 10장 + 하급 뽑기권 50장</span>
+      </div>
+      <div className="coupon-form-panel">
+        <Icon name="ticket" /><h2>신규 소환권 충전소.</h2><p>가지고 있는 쿠폰 코드를 입력해주세요.</p>
+        {user ? <form onSubmit={onSubmit}><label htmlFor="coupon-code">쿠폰 코드</label><input id="coupon-code" name="code" placeholder="LIMKETMON" maxLength={64} required autoComplete="off" autoCapitalize="characters" spellCheck={false} /><button className="btn btn-primary" disabled={busy}>{busy ? '쿠폰 확인 중…' : '뽑기권 받기'}<Icon name="arrow" /></button></form> : <a className="btn btn-primary" href={signIn('coupon')}>로그인하고 선물 받기<Icon name="arrow" /></a>}
+        {feedback && <div className={`feedback ${feedback.error ? 'error' : 'success'}`} role={feedback.error ? 'alert' : 'status'}><Icon name={feedback.error ? 'clock' : 'check'} /><span>{feedback.text}{!feedback.error && <button className="text-button" onClick={() => onNavigate('pull')}>카드팩 열러 가기<Icon name="arrow" /></button>}</span></div>}
+        <p className="coupon-note">받은 뽑기권은 내 계정에 저장됩니다.<br />이미 사용한 쿠폰은 다시 사용할 수 없어요.</p>
+      </div>
+    </div>
+  </section>;
 }
 
 /** Opens once, plays the stored event log back, and closes with the sheet. */

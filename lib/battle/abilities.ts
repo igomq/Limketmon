@@ -2,13 +2,16 @@
 // No hand-authored per-card table; CURATED_ABILITIES only retunes a handful of signatures.
 import type { Card } from '../cards.ts';
 import type { Rarity } from '../rules.ts';
-import { RARITY_COST, elementOf } from './stats.ts';
+import { RARITY_COST, elementOf, catalogCard } from './stats.ts';
 import { STATUS_IDS, type Ability, type AbilityOp, type AbilityTarget, type Element } from './types.ts';
 
-/** 2: the N template heals only when wounded and for less than its hit. */
-export const ABILITY_RULESET = 2;
+/**
+ * 2: the N template heals only when wounded and for less than its hit.
+ * 3: earth/water/fire/grass/dark element riders and the XR template.
+ */
+export const ABILITY_RULESET = 3;
 
-const RARITY_COOLDOWN: Record<Rarity, number> = { N: 0, R: 1, SR: 2, SSR: 2, UR: 3 };
+const RARITY_COOLDOWN: Record<Rarity, number> = { N: 0, R: 1, SR: 2, SSR: 2, UR: 3, XR: 3 };
 
 const MAX_OPS = 8;
 const MAX_CONDITIONAL_DEPTH = 1;
@@ -25,18 +28,18 @@ function hit(card: Card, ratio: number, hits = 1): AbilityOp {
     : { op: 'damage', power, target: 'enemy_active' };
 }
 
-/** Element-flavoured status rider: light buffs the team, everything else debuffs. */
+/** Element-flavoured status rider: fire fires the team up, everything else debuffs the enemy. */
 function rider(element: Element, card: Card, target: AbilityTarget): AbilityOp {
   switch (element) {
-    case 'light':
+    case 'fire':
       return { op: 'apply_status', status: 'atk_up', turns: 2, value: 12, target: 'ally_all' };
-    case 'shadow':
+    case 'water':
       return { op: 'apply_status', status: 'atk_down', turns: 2, value: 15, target };
-    case 'iron':
+    case 'earth':
       return { op: 'apply_status', status: 'def_down', turns: 2, value: 20, target };
-    case 'nature':
+    case 'grass':
       return { op: 'apply_status', status: 'poison', turns: 3, value: 3 + Math.round(card.attack / 25), target };
-    case 'spark':
+    case 'dark':
       return { op: 'apply_status', status: 'stun', turns: 1, chance: 35, target };
   }
 }
@@ -48,6 +51,7 @@ function rider(element: Element, card: Card, target: AbilityTarget): AbilityOp {
  *   SR  three-hit multi when it hits harder than it crits, otherwise a self atk buff + hit
  *   SSR team-wide damage (or an ally-wide shield when the card is a wall), plus rider
  *   UR  conditional finisher (bonus damage + self heal below 60% HP), then team-wide hit
+ *   XR  a stronger UR: the finisher hits harder, the team-wide hit is bigger, same rider
  */
 function templateOps(card: Card, element: Element): AbilityOp[] {
   switch (card.rarity) {
@@ -97,6 +101,19 @@ function templateOps(card: Card, element: Element): AbilityOp[] {
         { op: 'damage', power: Math.max(1, Math.round(card.attack * 0.6)), target: 'enemy_all' },
         rider(element, card, 'enemy_all')
       ];
+    case 'XR':
+      return [
+        {
+          op: 'conditional',
+          when: { selfHpBelow: 60 },
+          then: [
+            { op: 'damage', power: Math.max(1, Math.round(card.attack * 1.5)), target: 'enemy_active' },
+            { op: 'heal', amount: 30, target: 'self' }
+          ]
+        },
+        { op: 'damage', power: Math.max(1, Math.round(card.attack * 0.8)), target: 'enemy_all' },
+        rider(element, card, 'enemy_all')
+      ];
   }
 }
 
@@ -134,15 +151,17 @@ export const CURATED_ABILITIES: Record<string, Partial<Ability>> = {
 };
 
 export function abilityFor(card: Card): Ability {
-  const override = CURATED_ABILITIES[card.id];
+  const catalogId = card.baseCardId ?? card.id;
+  const original = catalogCard(card);
+  const override = CURATED_ABILITIES[catalogId];
   return {
-    id: `ability:${card.id}@${ABILITY_RULESET}`,
+    id: `ability:${catalogId}@${ABILITY_RULESET}`,
     name: card.skillName,
     description: card.skillDescription,
     // Rarity cost table stays authoritative so "cheap low-rarity skill" holds for every card.
     cost: RARITY_COST[card.rarity],
-    cooldown: override?.cooldown ?? RARITY_COOLDOWN[card.rarity],
-    ops: override?.ops ?? templateOps(card, elementOf(card))
+    cooldown: override?.cooldown ?? RARITY_COOLDOWN[original.rarity],
+    ops: override?.ops ?? templateOps(original, elementOf(original))
   };
 }
 

@@ -130,7 +130,7 @@ test('kstDate boundary: 15:00Z starts the next KST day', () => {
 
 test('daily rotation covers every rule kind and stays inside the five opponents', () => {
   const opponentIds = ['rookie', 'regular', 'veteran', 'ace', 'boss'];
-  const elements = ['light', 'shadow', 'iron', 'nature', 'spark'];
+  const elements = ['earth', 'water', 'fire', 'grass', 'dark'];
   const dates: string[] = [];
   const kinds = new Set<string>();
   const opponents = new Set<string>();
@@ -258,54 +258,72 @@ test('all_rarities needs all five owned rarities', () => {
 
 // ---------------------------------------------------------------- rewards
 
-test('a first PvE clear pays, a repeat clear pays nothing', () => {
+test('a first PvE clear pays its credits plus the win ticket twice', () => {
   const first = planBattleRewards(
-    { kind: 'pve', opponentId: 'ace', result: 'won', kstDate: '2026-09-10', firstClear: true },
+    { kind: 'pve', opponentId: 'ace', result: 'won', kstDate: '2026-09-10', firstClear: true, battleId: 'b1' },
     7
   );
-  assert.deepEqual(first, {
-    credits: 7,
-    claims: ['pve_first:ace'],
-    lines: [{ label: '첫 격파 보상', credits: 7 }]
-  });
-  const repeat = planBattleRewards(
-    { kind: 'pve', opponentId: 'ace', result: 'won', kstDate: '2026-09-10', firstClear: false },
-    7
-  );
-  assert.deepEqual(repeat, { credits: 0, claims: [], lines: [] });
-  assert.equal(pveFirstClearClaimKey('ace'), 'pve_first:ace');
-  assert.notEqual(pveFirstClearClaimKey('ace'), pveFirstClearClaimKey('boss'));
+  assert.equal(first.credits, 7);
+  assert.deepEqual(first.claims.map((claim) => claim.key), ['pve_first:ace', 'ticket:b1']);
+  // ace in normal mode pays 보통 x2 on every win, and again on the first clear.
+  assert.deepEqual(first.claims[0], { key: 'pve_first:ace', credits: 7, ticketType: 'normal', quantity: 2 });
+  assert.deepEqual(first.claims[1], { key: 'ticket:b1', credits: 0, ticketType: 'normal', quantity: 2 });
 });
 
-test('a daily win pays three credits with the day claim key', () => {
+test('a repeat PvE win pays only the win ticket', () => {
+  const repeat = planBattleRewards(
+    { kind: 'pve', opponentId: 'ace', result: 'won', kstDate: '2026-09-10', firstClear: false, battleId: 'b2' },
+    7
+  );
+  assert.equal(repeat.credits, 0);
+  assert.deepEqual(repeat.claims, [{ key: 'ticket:b2', credits: 0, ticketType: 'normal', quantity: 2 }]);
+  assert.equal(pveFirstClearClaimKey('ace'), 'pve_first:ace');
+  assert.notEqual(pveFirstClearClaimKey('ace'), pveFirstClearClaimKey('boss'));
+  assert.notEqual(pveFirstClearClaimKey('ace', 'hard'), pveFirstClearClaimKey('ace', 'normal'));
+});
+
+test('the win ticket follows the battle mode', () => {
+  const hardBoss = planBattleRewards(
+    { kind: 'pve', opponentId: 'boss', mode: 'hard', result: 'won', kstDate: '2026-09-10', firstClear: false, battleId: 'h1' },
+    9
+  );
+  assert.deepEqual(hardBoss.claims, [{ key: 'ticket:h1', credits: 0, ticketType: 'sr', quantity: 2 }]);
+  const chaosAce = planBattleRewards(
+    { kind: 'pve', opponentId: 'ace', mode: 'chaos', result: 'won', kstDate: '2026-09-10', firstClear: false, battleId: 'c1' },
+    9
+  );
+  assert.deepEqual(chaosAce.claims, [{ key: 'ticket:c1', credits: 0, ticketType: 'ssr', quantity: 2 }]);
+});
+
+test('a daily win pays three credits with the day claim key and no ticket', () => {
   const daily = planBattleRewards(
-    { kind: 'daily', opponentId: 'boss', result: 'won', kstDate: '2026-09-10', firstClear: false },
+    { kind: 'daily', opponentId: 'boss', result: 'won', kstDate: '2026-09-10', firstClear: false, battleId: 'd1' },
     9
   );
   assert.deepEqual(daily, {
     credits: 3,
-    claims: ['daily:2026-09-10'],
+    claims: [{ key: 'daily:2026-09-10', credits: 3 }],
     lines: [{ label: '데일리 챌린지 보상', credits: 3 }]
   });
   const nextDay = planBattleRewards(
-    { kind: 'daily', opponentId: 'boss', result: 'won', kstDate: '2026-09-11', firstClear: false },
+    { kind: 'daily', opponentId: 'boss', result: 'won', kstDate: '2026-09-11', firstClear: false, battleId: 'd1' },
     9
   );
-  assert.notEqual(daily.claims[0], nextDay.claims[0]);
-  // firstClear never adds a PvE claim on top of a daily win
+  assert.notEqual(daily.claims[0]!.key, nextDay.claims[0]!.key);
+  // firstClear never adds a PvE claim or a ticket on top of a daily win
   const dailyFirst = planBattleRewards(
-    { kind: 'daily', opponentId: 'boss', result: 'won', kstDate: '2026-09-10', firstClear: true },
+    { kind: 'daily', opponentId: 'boss', result: 'won', kstDate: '2026-09-10', firstClear: true, battleId: 'd2' },
     9
   );
-  assert.deepEqual(dailyFirst.claims, ['daily:2026-09-10']);
-  assert.ok(!dailyFirst.claims.some((claim) => claim.startsWith('pve_first:')));
+  assert.deepEqual(dailyFirst.claims.map((claim) => claim.key), ['daily:2026-09-10']);
+  assert.ok(dailyFirst.claims.every((claim) => claim.ticketType === undefined));
 });
 
 test('losses and draws never pay for either battle kind', () => {
   for (const kind of ['pve', 'daily'] as const) {
     for (const result of ['lost', 'draw'] as const) {
       const plan = planBattleRewards(
-        { kind, opponentId: 'rookie', result, kstDate: '2026-09-10', firstClear: true },
+        { kind, opponentId: 'rookie', result, kstDate: '2026-09-10', firstClear: true, battleId: 'b0' },
         5
       );
       assert.deepEqual(plan, { credits: 0, claims: [], lines: [] }, `${kind}/${result}`);
