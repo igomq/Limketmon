@@ -159,15 +159,14 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
       <a className="skip-link" href="#content">본문으로 건너뛰기</a>
       <header className="topbar"><div className="topbar-inner">
         <button className="brand" onClick={() => navigate('home')} aria-label="LIMKETMON 발견 페이지"><Brand /></button>
-        <nav className="main-nav" aria-label="주요 메뉴" style={{ gridTemplateColumns: `repeat(${navItems.length}, minmax(0, 1fr))` }}>{navItems.map((item) => <motion.button key={item.id} onClick={() => navigate(item.id)} className={tab === item.id ? 'active' : ''} aria-current={tab === item.id ? 'page' : undefined} whileTap={{ scale: 0.95 }}>
+        <div className="account-area">{user ? <><button type="button" className="text-button credit-pill" onClick={() => navigate('coupon')} title="쿠폰으로 뽑기권 받기"><Icon name="ticket" /><strong>{snapshot.credits.toLocaleString('ko-KR')}</strong><span className="sr-only">뽑기권, 쿠폰 입력으로 받기</span></button><a className="icon-button" href="/signout-with-chatgpt?return_to=%2F" aria-label="로그아웃" title="로그아웃"><Icon name="logout" /></a></> : <a className="sign-in-link" href={signIn(tab)}>로그인<Icon name="arrow" /></a>}</div>
+      </div></header>
+      <nav className="main-nav" aria-label="주요 메뉴" style={{ gridTemplateColumns: `repeat(${navItems.length}, minmax(0, 1fr))` }}>{navItems.map((item) => <motion.button key={item.id} onClick={() => navigate(item.id)} className={tab === item.id ? 'active' : ''} aria-current={tab === item.id ? 'page' : undefined} whileTap={{ scale: 0.95 }}>
           {tab === item.id && <motion.span className="nav-indicator" layoutId="navigation" transition={spring} />}
           <span className="nav-label"><Icon name={item.icon} />{item.label}</span>
           {item.id === 'pull' && user && snapshot.freeAvailable && <i className="nav-dot" aria-label="무료 뽑기 가능" />}
           {item.id === 'battle' && user && !snapshot.daily.cleared && <i className="nav-dot" aria-label="오늘의 도전 남음" />}
         </motion.button>)}</nav>
-        
-        <div className="account-area">{user ? <><button type="button" className="text-button credit-pill" onClick={() => navigate('coupon')} title="쿠폰으로 뽑기권 받기"><Icon name="ticket" /><strong>{snapshot.credits.toLocaleString('ko-KR')}</strong><span className="sr-only">뽑기권, 쿠폰 입력으로 받기</span></button><a className="icon-button" href="/signout-with-chatgpt?return_to=%2F" aria-label="로그아웃" title="로그아웃"><Icon name="logout" /></a></> : <a className="sign-in-link" href={signIn(tab)}>로그인<Icon name="arrow" /></a>}</div>
-      </div></header>
       
       <main id="content" ref={content} tabIndex={-1} className="page">
         <AnimatePresence mode="popLayout" initial={false}>
