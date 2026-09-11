@@ -5,7 +5,7 @@ import { memo, useEffect, useId, useRef, useState, type PointerEvent, type React
 import type { Card } from '../lib/cards';
 import { battleStats } from '../lib/battle/stats';
 import { enhanceSkillsForCard, scaleAbility } from '../lib/battle/enhance-skills';
-import { applyEnhance, canEnhance, enhanceCost, MAX_ENHANCE } from '../lib/enhance';
+import { applyEnhance, canEnhance, enhanceCost, enhanceMaterials, MAX_ENHANCE } from '../lib/enhance';
 import { ELEMENT_LABEL, STATUS_LABEL, type AbilityOp, type CardBattleStats } from '../lib/battle/types';
 import { cardTitle, projectedPosition } from '../lib/collection';
 
@@ -45,6 +45,7 @@ type CardArtworkProps = { card: Card; quantity?: number; enhanceLevel?: number; 
  */
 export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantity = 0, enhanceLevel = 0, priority = false }: CardArtworkProps) {
   const thumbKey = card.imageKey ? `${card.imageKey.replace(/\.[^.]+$/, "")}.webp` : "";
+  const materials = enhanceMaterials(quantity);
   return (
     <div className={`card-art rarity-${card.rarity}`}>
       <img src={`/cards/thumbs/${thumbKey}`} alt={cardTitle(card)} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : undefined} decoding="async" draggable={false} />
@@ -52,7 +53,7 @@ export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantit
       <span className="card-edition">LIMKETMON <span>ORIGINALS</span></span>
       <span className="card-rarity">{card.rarity}<Icon name="sparkle" /></span>
       <div className="card-caption"><span>No. {String(card.version).padStart(3, '0')}</span><strong>{cardTitle(card)}</strong><small>{card.skillName}</small></div>
-      {quantity > 1 && <span className="card-quantity">×{quantity}</span>}
+      {materials > 0 && <span className="card-quantity">재료 {materials}</span>}
       {enhanceLevel > 0 && <span className="card-enhance">+{enhanceLevel}</span>}
       <span className="card-frame" />
     </div>
@@ -62,6 +63,7 @@ export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantit
 /** Tilt + foil: only the one or two cards the player is actively looking at (detail, pull reveal). */
 function InteractiveCardArtwork({ card, quantity = 0, enhanceLevel = 0, priority = false }: CardArtworkProps) {
   const reduced = useReducedMotion();
+  const materials = enhanceMaterials(quantity);
   const rx = useSpring(0, gentleSpring);
   const ry = useSpring(0, gentleSpring);
   const light = useSpring(0, { stiffness: 350, damping: 35 });
@@ -94,7 +96,7 @@ function InteractiveCardArtwork({ card, quantity = 0, enhanceLevel = 0, priority
       <span className="card-edition">LIMKETMON <span>ORIGINALS</span></span>
       <span className="card-rarity">{card.rarity}<Icon name="sparkle" /></span>
       <div className="card-caption"><span>No. {String(card.version).padStart(3, '0')}</span><strong>{cardTitle(card)}</strong><small>{card.skillName}</small></div>
-      {quantity > 1 && <span className="card-quantity">×{quantity}</span>}
+      {materials > 0 && <span className="card-quantity">재료 {materials}</span>}
       {enhanceLevel > 0 && <span className="card-enhance">+{enhanceLevel}</span>}
       <motion.div className="card-foil" style={{ opacity: light, backgroundPosition: position }} />
       <motion.div className="card-glare" style={{ opacity: light, backgroundImage: glare }} />
@@ -108,7 +110,7 @@ export function CardArtwork({ interactive = false, ...props }: CardArtworkProps 
 }
 
 export function CardButton({ card, quantity = 0, enhanceLevel = 0, onClick, priority = false }: { card: Card; quantity?: number; enhanceLevel?: number; onClick: () => void; priority?: boolean }) {
-  return <button type="button" className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장` : '카드 미리보기'}`}><StaticCardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority={priority} /></button>;
+  return <button type="button" className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장 · 강화 재료 ${enhanceMaterials(quantity)}장` : '카드 미리보기'}`}><StaticCardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority={priority} /></button>;
 }
 
 export function CardBack({ count = 1 }: { count?: number }) {
@@ -228,6 +230,9 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
   const y = useMotionValue(0);
   const dragged = useRef(false);
   const [note, setNote] = useState<string | null>(null);
+  const materials = enhanceMaterials(quantity);
+  const cost = enhanceCost(enhanceLevel);
+  const deficit = cost - materials;
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -276,13 +281,13 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
                     }
                   }}
                 >
-                  {enhanceLevel >= MAX_ENHANCE ? '최대 강화' : canEnhance(quantity, enhanceLevel) ? '강화 +' + (enhanceLevel + 1) + ' · ' + enhanceCost(enhanceLevel) + '장 소모' : '같은 카드 ' + enhanceCost(enhanceLevel) + '장 필요'}
+                  {enhanceLevel >= MAX_ENHANCE ? '최대 강화' : canEnhance(quantity, enhanceLevel) ? '강화 +' + (enhanceLevel + 1) + ' · 재료 ' + cost + '장 소모' : '강화 재료 ' + materials + '장 / ' + cost + '장 필요 · ' + deficit + '장 부족'}
                 </button>
               ) : null}
               {note && <p className="enhance-note">{note}</p>}
             </div>
           )}
-          <div className="detail-ownership"><span>{quantity ? <><Icon name="check" />내 컬렉션 · {quantity}장 보유</> : '아직 발견하지 못한 카드'}</span>{obtainedAt && <small>{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium' }).format(new Date(obtainedAt))} 첫 수집</small>}</div>
+          <div className="detail-ownership"><span>{quantity ? <><Icon name="check" />내 컬렉션 · 총 {quantity}장 · 강화 재료 {materials}장</> : '아직 발견하지 못한 카드'}</span>{obtainedAt && <small>{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium' }).format(new Date(obtainedAt))} 첫 수집</small>}</div>
         </div>
         </div>
       </motion.section>

@@ -11,7 +11,7 @@ import { planBattleRewards, pveFirstClearClaimKey, rollTicketDrop, ticketDropCla
 import { summarizeBattles, type BattleRow } from './stats';
 import { CATALOG, buildSetup, CARD_BY_ID } from './battle/setup';
 import { battleStats } from './battle/stats';
-import { applyEnhance, clampEnhance, enhanceCost, MAX_ENHANCE, parseDeckSlots } from './enhance';
+import { applyEnhance, clampEnhance, enhanceCost, enhanceMaterials, MAX_ENHANCE, parseDeckSlots } from './enhance';
 import { BATTLE_MODES, BATTLE_RULESET_VERSION, type BattleEvent, type BattleMode, type BattleModifier, type BattleState, type Decision } from './battle/types';
 import { MODE_LABELS, OPPONENTS, opponentById } from './battle/opponents';
 import { aiDecision } from './battle/ai';
@@ -425,7 +425,8 @@ export async function enhanceCard(userId: string, rawCardId: unknown): Promise<S
     if (level >= MAX_ENHANCE) throw new GameError('max_enhance', '이미 최대 강화예요.');
     const cost = enhanceCost(level);
     if (quantity - cost < 1) {
-      throw new GameError('not_enough_copies', '같은 카드가 ' + String(cost) + '장 더 필요해요. 한 장은 남겨 둡니다.');
+      const deficit = cost - enhanceMaterials(quantity);
+      throw new GameError('not_enough_copies', '강화 재료가 ' + String(deficit) + '장 부족해요. 같은 카드 한 장은 남겨 둡니다.');
     }
     const updated = await db.prepare(sql).bind(cost, userId, rawCardId, level, quantity, MAX_ENHANCE, cost).run();
     if (Number((updated.meta as { changes?: number }).changes ?? 0)) return getSnapshot(userId);

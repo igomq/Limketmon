@@ -31,10 +31,16 @@ export function enhanceCost(level: number): number {
   return clampEnhance(level) + 1;
 }
 
-/** Keep one copy. Need quantity - cost >= 1. */
+/** One copy is kept as the base card; only the rest can be spent. Total quantity is stored as-is. */
+export function enhanceMaterials(quantity: number): number {
+  const total = Number.isFinite(quantity) ? Math.floor(quantity) : 0;
+  return Math.max(0, total - 1);
+}
+
+/** Keep one copy. Need quantity - cost >= 1, i.e. materials >= cost. */
 export function canEnhance(quantity: number, level: number): boolean {
   const current = clampEnhance(level);
-  return current < MAX_ENHANCE && quantity - enhanceCost(current) >= 1;
+  return current < MAX_ENHANCE && enhanceMaterials(quantity) >= enhanceCost(current);
 }
 
 export function applyEnhance<T extends { maxHp: number; atk: number; def: number; crit: number }>(

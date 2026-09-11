@@ -9,6 +9,7 @@ import { HARD_PITY_AT, RARITY_ORDER, RARITY_WEIGHTS, hardPityOdds, isHardPity, p
 import { STATUS_LABEL, type BattleEvent } from '../lib/battle/types';
 import { MODE_LABELS } from '../lib/battle/opponents';
 import { cardTitle, projectedPosition, selectCards, type CollectionFilter } from '../lib/collection';
+import { enhanceMaterials } from '../lib/enhance';
 import { Brand, CardArtwork, CardBack, CardButton, CardDetail, Icon, gentleSpring, spring } from './card-ui';
 import './battle.css';
 
@@ -385,7 +386,7 @@ function CollectionView({ user, snapshot, cards, filter, onFilter, onOpen, onNav
     <p className="results-count" role="status">{visible.length}개의 카드{filter.query && ` · “${filter.query}” 검색 결과`}</p>
     {visible.length ? <div className="archive-grid">{visible.map((card) => {
       const owned = inventory.get(card.id);
-      return <div key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`}><CardButton card={card} quantity={owned?.quantity} enhanceLevel={owned?.enhanceLevel} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong><span>{owned ? <><Icon name="check" />보유 {owned.quantity}장{owned.enhanceLevel ? ' · +' + owned.enhanceLevel : ''}</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></div>;
+      return <div key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`}><CardButton card={card} quantity={owned?.quantity} enhanceLevel={owned?.enhanceLevel} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong><span>{owned ? <><Icon name="check" />보유 {owned.quantity}장 · 재료 {enhanceMaterials(owned.quantity)}장{owned.enhanceLevel ? ' · +' + owned.enhanceLevel : ''}</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></div>;
     })}</div> : <div className="empty-state"><Icon name="search" /><h2>{filter.ownership === 'owned' && !snapshot.inventory.length ? '아직 잡힌 신규가 없어요.' : '해당하는 카드가 없어요.'}</h2><p>{filter.ownership === 'owned' && !snapshot.inventory.length ? '오늘의 무료 팩에서 첫 신규를 잡아보세요.' : '다른 검색어를 쓰거나 필터를 바꿔보세요.'}</p><button className="btn btn-dark" onClick={() => { if (filter.ownership === 'owned' && !snapshot.inventory.length) onNavigate('pull'); else onFilter(defaultFilter); }}>{filter.ownership === 'owned' && !snapshot.inventory.length ? '무료 카드 열기' : '필터 초기화'}<Icon name="arrow" /></button></div>}
   </section>;
 }

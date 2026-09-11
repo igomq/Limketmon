@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
-import { applyEnhance, canEnhance, clampEnhance, enhanceCost, enhancePower, MAX_ENHANCE, parseDeckSlots } from '../lib/enhance.ts';
+import { applyEnhance, canEnhance, clampEnhance, enhanceCost, enhanceMaterials, enhancePower, MAX_ENHANCE, parseDeckSlots } from '../lib/enhance.ts';
 import { battleStats } from '../lib/battle/stats.ts';
 import { createD1, migrate } from './helpers/d1.mjs';
 import { cardIdsByRarity, seedOwned } from './helpers/seed.ts';
@@ -21,6 +21,20 @@ test('enhance cost starts at 1 and climbs one extra copy per level', () => {
   assert.equal(clampEnhance(-2), 0);
   assert.equal(clampEnhance(99), MAX_ENHANCE);
   assert.equal(MAX_ENHANCE, 15);
+});
+
+test('enhanceMaterials keeps one base copy and canEnhance agrees at the boundaries', () => {
+  // Displayed material count is total minus the one base copy that is never spent.
+  assert.equal(enhanceMaterials(1), 0);
+  assert.equal(enhanceMaterials(3), 2);
+  assert.equal(enhanceMaterials(4), 3);
+  assert.equal(enhanceMaterials(6), 5);
+  assert.equal(enhanceMaterials(0), 0);
+  assert.equal(enhanceMaterials(-4), 0);
+  // +3 costs three materials, so three total copies (two materials) cannot do it.
+  assert.equal(canEnhance(3, 2), false);
+  assert.equal(canEnhance(4, 2), true);
+  assert.equal(canEnhance(6, 2), true);
 });
 
 test('enhancePower hits the documented landmarks within 15% and grows strictly', () => {
@@ -114,4 +128,24 @@ test('enhancing consumes copies, keeps one, and the battle snapshot uses the new
   assert.equal(setup.player[0]!.atk, expected.atk);
   assert.equal(setup.player[0]!.def, expected.def);
   assert.equal(setup.player[0]!.maxHp, expected.maxHp);
+});
+
+test('spending three materials from four copies keeps the base, and a shortfall is reported', async () => {
+  db.exec('DELETE FROM inventory');
+  const ids = cardIdsByRarity({ N: 2 });
+  const rich = ids[0]!;
+  const poor = ids[1]!;
+
+  // Four copies at +2: three materials, so +3 spends them all and leaves the base copy.
+  seedOwned(db, USER, [rich, rich, rich, rich]);
+  db.exec(`UPDATE inventory SET enhance_level = 2 WHERE user_id = '${USER}' AND card_id = '${rich}'`);
+  const after = await game.enhanceCard(USER, rich);
+  const item = after.inventory.find((entry) => entry.cardId === rich)!;
+  assert.equal(item.enhanceLevel, 3);
+  assert.equal(item.quantity, 1, 'the base copy stays');
+
+  // Three copies at +2: only two materials, so +3 must fail naming the one-material deficit.
+  seedOwned(db, USER, [poor, poor, poor]);
+  db.exec(`UPDATE inventory SET enhance_level = 2 WHERE user_id = '${USER}' AND card_id = '${poor}'`);
+  await assert.rejects(game.enhanceCard(USER, poor), /강화 재료가 1장 부족/);
 });

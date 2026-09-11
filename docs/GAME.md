@@ -31,7 +31,9 @@
 | UR | 3.55 | 6 |
 
 같은 카드 중복은 강화에 소모합니다. `lib/enhance.ts`의 `MAX_ENHANCE`는 15이고 `enhanceCost(level)`은
-레벨이 오를수록 1장씩 더 듭니다(0→1은 1장, 1→2는 2장, …). 강화 배수는 등급별 `enhancePower(rarity, level)`
+레벨이 오를수록 1장씩 더 듭니다(0→1은 1장, 1→2는 2장, …). 기본 카드 1장은 항상 남겨 두고 나머지만
+재료가 되므로 화면에 보이는 재료 수는 `enhanceMaterials(quantity) = max(0, quantity - 1)`이고, 저장되는
+`inventory.quantity`는 기본 카드를 포함한 전체 합계입니다. 강화 배수는 등급별 `enhancePower(rarity, level)`
 곡선의 비율이며, 이 곡선은 N5≈R3≈SR0, N10≈R5≈SR2≈SSR0, N15≈R10≈SR6≈SSR3≈UR0 지점을 근사합니다
 (±15%). 모든 호출자는 `applyEnhance(stats, level, rarity)`를 등급과 함께 씁니다. 전투 시작 때 강화
 단계를 덱 스냅샷에 고정합니다.
