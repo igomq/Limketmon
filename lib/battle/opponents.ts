@@ -1,6 +1,37 @@
 // Five curated PvE opponents. Difficulty is deck composition + AI profile + hpScale,
 // never HP alone: rookie runs three N cards at reduced HP, boss runs the highest rarities.
-import type { Opponent } from './types.ts';
+import { BATTLE_MODES, type BattleMode, type Opponent } from './types.ts';
+
+export { BATTLE_MODES };
+
+/** Korean labels the UI renders verbatim. 'hard' is 하드 (고급 is not used for the mode). */
+export const MODE_LABELS: Record<BattleMode, string> = {
+  normal: '일반',
+  hard: '하드',
+  chaos: '카오스'
+};
+
+/** First-clear credit multiplier per mode. */
+export const MODE_CREDITS_MULTIPLIER: Record<BattleMode, number> = {
+  normal: 1,
+  hard: 2,
+  chaos: 4
+};
+
+interface ModeTuning {
+  hp: number;
+  stat: number;
+  heal: number;
+  appetite: number;
+  ruthless: boolean;
+}
+
+/** Mode difficulty rides on top of the base ladder: scaling HP, ATK/DEF, and AI aggression. */
+const MODE_TUNING: Record<BattleMode, ModeTuning> = {
+  normal: { hp: 1, stat: 1.06, heal: 0.95, appetite: 1.1, ruthless: false },
+  hard: { hp: 1.5, stat: 1.5, heal: 0.85, appetite: 1.25, ruthless: true },
+  chaos: { hp: 2.1, stat: 2.1, heal: 0.7, appetite: 1.4, ruthless: true }
+};
 
 export const OPPONENTS: Opponent[] = [
   {
@@ -8,7 +39,7 @@ export const OPPONENTS: Opponent[] = [
     name: '루키 조교',
     title: '첫 대련',
     difficulty: 'beginner',
-    blurb: '연습용 카드 세 장. 스킬을 아껴 쓰고 힐을 자주 넣는다. 세 장의 N/R 덱이면 충분히 이긴다.',
+    blurb: '연습용 카드 세 장. 스킬을 아껴 쓰고 힐을 자주 넣는다. 조합된 N/R 덱으로 도전하세요.',
     cards: ['imsingyu-v002', 'imsingyu-v019', 'imsingyu-v003'],
     hpScale: 0.9,
     // Healing only when genuinely hurt: a 0.95 threshold made the beginner AI heal every turn
@@ -64,6 +95,28 @@ export const OPPONENTS: Opponent[] = [
 
 export const DEFAULT_OPPONENT_ID = 'rookie';
 
-export function opponentById(id: string): Opponent | undefined {
-  return OPPONENTS.find((opponent) => opponent.id === id);
+/**
+ * The opponent as it appears in one mode. Mode tuning scales combat stats (HP + ATK/DEF + AI +
+ * credits) that replay and settlement both re-derive from the stored mode.
+ */
+export function opponentById(id: string, mode: BattleMode = 'normal'): Opponent | undefined {
+  const base = OPPONENTS.find((opponent) => opponent.id === id);
+  if (!base) return undefined;
+  const tuning = MODE_TUNING[mode];
+  return {
+    ...base,
+    hpScale: base.hpScale * tuning.hp,
+    statScale: tuning.stat,
+    profile: {
+      ...base.profile,
+      healBelow: base.profile.healBelow * tuning.heal,
+      lethalFirst: base.profile.lethalFirst || tuning.ruthless,
+      skillAppetite: Math.min(1, base.profile.skillAppetite * tuning.appetite)
+    },
+    reward: {
+      ...base.reward,
+      credits: base.reward.credits * MODE_CREDITS_MULTIPLIER[mode],
+      label: mode === 'normal' ? base.reward.label : `${MODE_LABELS[mode]} · ${base.reward.label}`
+    }
+  };
 }

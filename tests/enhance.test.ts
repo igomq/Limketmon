@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
-import { applyEnhance, canEnhance, clampEnhance, enhanceCost, MAX_ENHANCE, parseDeckSlots } from '../lib/enhance.ts';
+import { applyEnhance, canEnhance, clampEnhance, enhanceCost, enhancePower, MAX_ENHANCE, parseDeckSlots } from '../lib/enhance.ts';
 import { battleStats } from '../lib/battle/stats.ts';
 import { createD1, migrate } from './helpers/d1.mjs';
 import { cardIdsByRarity, seedOwned } from './helpers/seed.ts';
 import manifest from '../lib/data/cards.curated.json' with { type: 'json' };
 import type { Card } from '../lib/cards.ts';
+import type { Rarity } from '../lib/rules.ts';
 
 const cards = manifest.cards as Card[];
 
@@ -19,16 +20,47 @@ test('enhance cost starts at 1 and climbs one extra copy per level', () => {
   assert.equal(canEnhance(99, MAX_ENHANCE), false);
   assert.equal(clampEnhance(-2), 0);
   assert.equal(clampEnhance(99), MAX_ENHANCE);
+  assert.equal(MAX_ENHANCE, 15);
 });
 
-test('applyEnhance scales combat stats and parseDeckSlots reads old snapshots', () => {
-  const card = cards[0]!;
+test('enhancePower hits the documented landmarks within 15% and grows strictly', () => {
+  // Approximate bands: N5~R3~SR0, N10~R5~SR2~SSR0, N15~R10~SR6~SSR3~UR0.
+  const groups: Array<Array<[Rarity, number]>> = [
+    [['N', 5], ['R', 3], ['SR', 0]],
+    [['N', 10], ['R', 5], ['SR', 2], ['SSR', 0]],
+    [['N', 15], ['R', 10], ['SR', 6], ['SSR', 3], ['UR', 0]]
+  ];
+  for (const group of groups) {
+    const values = group.map(([rarity, level]) => enhancePower(rarity, level));
+    const max = Math.max(...values);
+    for (const value of values) {
+      assert.ok((max - value) / max <= 0.15, `group spread ${JSON.stringify(group)}: ${value} vs ${max}`);
+    }
+  }
+  // Exact coincidences the curve guarantees, so the cheap deck genuinely catches up.
+  assert.ok(Math.abs(enhancePower('N', 5) - enhancePower('SR', 0)) < 1e-9);
+  assert.ok(Math.abs(enhancePower('N', 10) - enhancePower('SSR', 0)) < 1e-9);
+  assert.ok(Math.abs(enhancePower('N', 15) - enhancePower('UR', 0)) < 1e-9);
+  for (const rarity of ['N', 'R', 'SR', 'SSR', 'UR'] as const) {
+    for (let level = 0; level < MAX_ENHANCE; level++) {
+      assert.ok(enhancePower(rarity, level + 1) > enhancePower(rarity, level), `${rarity}@${level}`);
+    }
+  }
+});
+
+test('applyEnhance scales combat stats by the rarity curve and parseDeckSlots reads old snapshots', () => {
+  const card = cards.find((entry) => entry.rarity === 'SR')!;
   const base = battleStats(card);
-  const boosted = applyEnhance(base, 2);
-  assert.equal(boosted.maxHp, Math.round(base.maxHp * 1.16));
-  assert.equal(boosted.atk, Math.round(base.atk * 1.16));
-  assert.equal(boosted.def, Math.round(base.def * 1.16));
-  assert.equal(boosted.crit, base.crit + 1);
+  const level = 6;
+  const mul = enhancePower('SR', level) / enhancePower('SR', 0);
+  const boosted = applyEnhance(base, level, card.rarity);
+  assert.equal(boosted.maxHp, Math.round(base.maxHp * mul));
+  assert.equal(boosted.atk, Math.round(base.atk * mul));
+  assert.equal(boosted.def, Math.round(base.def * mul));
+  assert.equal(boosted.crit, base.crit + Math.floor(level / 3));
+  // Level 0 is an identity, and the default rarity keeps the N curve.
+  assert.deepEqual(applyEnhance(base, 0, card.rarity), base);
+  assert.deepEqual(applyEnhance(base, 0), base);
   assert.deepEqual(parseDeckSlots('["imsingyu-v001","imsingyu-v002"]'), [
     { id: 'imsingyu-v001', enhance: 0 },
     { id: 'imsingyu-v002', enhance: 0 }
@@ -77,7 +109,7 @@ test('enhancing consumes copies, keeps one, and the battle snapshot uses the new
   const deck = (await game.createDeck(USER, '강화 덱', owned)).find((entry) => entry.name === '강화 덱')!;
   const setup = await game.startBattle(USER, { deckId: deck.id, opponentId: 'rookie' }, new Date('2026-09-10T03:00:00Z'));
   const card = cards.find((entry) => entry.id === owned[0])!;
-  const expected = applyEnhance(battleStats(card), 1);
+  const expected = applyEnhance(battleStats(card), 1, card.rarity);
   assert.equal(setup.player[0]!.enhance, 1);
   assert.equal(setup.player[0]!.atk, expected.atk);
   assert.equal(setup.player[0]!.def, expected.def);

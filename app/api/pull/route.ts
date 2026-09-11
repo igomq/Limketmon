@@ -11,11 +11,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '뽑기 수량을 확인해주세요.' }, { status: 400 });
     }
     const count = 'count' in body ? body.count : 1;
-    if (count !== 1 && count !== 5) {
-      return NextResponse.json({ error: '1회 또는 5연속 뽑기만 가능합니다.' }, { status: 400 });
+    if (count !== 1 && count !== 5 && count !== 10) {
+      return NextResponse.json({ error: '1회, 5연속, 10연속 뽑기만 가능합니다.' }, { status: 400 });
+    }
+    const ticketType = 'ticketType' in body ? body.ticketType : 'normal';
+    if (ticketType !== 'normal' && ticketType !== 'sr' && ticketType !== 'ssr') {
+      return NextResponse.json({ error: '뽑기권 종류를 확인해주세요.' }, { status: 400 });
     }
     await ensureUser(user.userId, user.email);
-    return NextResponse.json(await pullCards(user.userId, count));
+    return NextResponse.json(await pullCards(user.userId, count, ticketType));
   } catch (error) {
     if (error instanceof GameError) return NextResponse.json({ error: error.message }, { status: 400 });
     console.error('Card pull failed', error);

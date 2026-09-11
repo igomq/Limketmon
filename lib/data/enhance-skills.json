@@ -1,0 +1,1062 @@
+{
+  "cards": [
+    {
+      "cardId": "imsingyu-v001",
+      "skills": [
+        {
+          "level": 5,
+          "name": "미간 주름 집속",
+          "description": "눈썹 사이 주름을 깊게 모아 적에게 단일 타격을 가한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "초집중 압력장",
+          "description": "극도의 집중력으로 주변을 짓눌러 적의 방어력을 깎아낸다.",
+          "archetype": "def_down"
+        },
+        {
+          "level": 15,
+          "name": "궁극의 미간 붕괴파",
+          "description": "압축된 미간의 응축력을 한 번에 터뜨려 적 전체를 흔든다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v002",
+      "skills": [
+        {
+          "level": 5,
+          "name": "유리창 반사각",
+          "description": "거울면에 튕겨 나온 섬광으로 적을 기습 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "파란 후드 환영",
+          "description": "교실 거울에 투영된 잔상으로 자신에게 단단한 보호막을 두른다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "전신 거울 점호",
+          "description": "교실 전체 거울에 일제히 출석 도장을 찍어 적 전원에게 충격을 준다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v003",
+      "skills": [
+        {
+          "level": 5,
+          "name": "젓가락 연속 집기",
+          "description": "숙련된 젓가락질로 적을 빠르게 2회 연속 찌른다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 10,
+          "name": "매운 국물 흡입",
+          "description": "얼큰하고 뜨거운 국물을 들이켜 체력을 회복한다.",
+          "archetype": "heal"
+        },
+        {
+          "level": 15,
+          "name": "농축 나트륨 투척",
+          "description": "바닥까지 우려낸 짠 국물을 끼얹어 적을 맹독 상태로 만든다.",
+          "archetype": "poison"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v004",
+      "skills": [
+        {
+          "level": 5,
+          "name": "초근접 안면 들이밀기",
+          "description": "렌즈 바로 앞까지 다가가 적의 시야를 강하게 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "구명조끼 공기압",
+          "description": "구명조끼의 완충력으로 자신에게 보호막을 생성한다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "워터파크 렌즈 밀착",
+          "description": "숨결이 닿는 0cm 거리로 돌진해 적을 깜짝 놀라 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v005",
+      "skills": [
+        {
+          "level": 5,
+          "name": "두툼한 외투막",
+          "description": "겹겹이 쌓인 옷더미 속에 웅크려 튼튼한 방어막을 친다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 10,
+          "name": "요새 속 쪽잠",
+          "description": "회색 이불 안에서 체온을 유지하며 지속적으로 체력을 채운다.",
+          "archetype": "regen"
+        },
+        {
+          "level": 15,
+          "name": "옷더미 와르르",
+          "description": "높게 쌓아둔 외투 성벽을 무너뜨려 적 전체를 덮친다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v006",
+      "skills": [
+        {
+          "level": 5,
+          "name": "사자갈기 헤어어택",
+          "description": "한껏 부풀어 오른 머리칼을 휘둘러 적을 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "두피 볼륨 포효",
+          "description": "천장을 뚫을 듯한 거대한 포효로 자신의 공격력을 끌어올린다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "초음파 두피 진동",
+          "description": "두피와 성대가 공명하는 굉음으로 적을 일시적으로 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v007",
+      "skills": [
+        {
+          "level": 5,
+          "name": "차가운 입술 삐죽",
+          "description": "냉정한 뾰로통 표정으로 적의 허점을 찔러 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "냉랭한 유죄 선고",
+          "description": "수면 위 매서운 눈빛으로 적의 방어 태세를 크게 흔든다.",
+          "archetype": "def_down"
+        },
+        {
+          "level": 15,
+          "name": "얼음장 파도 심판",
+          "description": "차가운 물살을 사방으로 일으켜 모든 적을 휩쓴다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v008",
+      "skills": [
+        {
+          "level": 5,
+          "name": "굴절률 레이저",
+          "description": "압축 왜곡된 안경알로 빛을 모아 적을 꿰뚫는다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "약점 200배 확대",
+          "description": "적의 틈새를 낱낱이 간파하여 적의 방어력을 깎아낸다.",
+          "archetype": "def_down"
+        },
+        {
+          "level": 15,
+          "name": "안경 렌즈 섬광",
+          "description": "빛을 왜곡 반사시켜 적의 눈을 멀게 해 기절 상태로 만든다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v009",
+      "skills": [
+        {
+          "level": 5,
+          "name": "손가락 핑 조준",
+          "description": "손가락으로 적의 취약 지점을 정확히 지정해 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "슬로프 활강 태세",
+          "description": "헬멧을 고쳐 쓰고 완벽한 활주 각을 재며 공격력을 올린다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "설원 눈보라 유도",
+          "description": "가리킨 지점으로 거센 눈보라를 유도해 전원의 발을 묶고 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v010",
+      "skills": [
+        {
+          "level": 5,
+          "name": "수증기 연막",
+          "description": "하얗게 번진 렌즈 김서림으로 몸을 감싸 보호막을 얻는다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 10,
+          "name": "반잠항 체력회복",
+          "description": "물속에 조용히 몸을 담그고 휴식을 취해 지속 회복한다.",
+          "archetype": "regen"
+        },
+        {
+          "level": 15,
+          "name": "물안개 기습 분출",
+          "description": "뿌연 김서림 너머에서 기습적으로 솟구쳐 적을 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v011",
+      "skills": [
+        {
+          "level": 5,
+          "name": "열 손가락 찌르기",
+          "description": "양손을 번갈아 뻗으며 적을 빠르게 난타한다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 10,
+          "name": "선턴 장악의 환호",
+          "description": "양손을 높이 번쩍 들고 자신만만한 미소로 공격력을 높인다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "선제공격 카운트다운",
+          "description": "카운트다운이 끝나기 전 전장을 휩쓸어 적 전체를 강타한다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v012",
+      "skills": [
+        {
+          "level": 5,
+          "name": "머리칼 스파크",
+          "description": "삐죽 솟은 머리카락 끝에서 정전기를 튀겨 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "부팅 전류 충전",
+          "description": "기상 직후 찌릿한 전류를 온몸에 둘러 공격력을 증폭시킨다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "정전기 과부하 방전",
+          "description": "머리끝에 모인 고압 정전기를 방출해 적을 감전시켜 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v013",
+      "skills": [
+        {
+          "level": 5,
+          "name": "스트라이프 핑거",
+          "description": "줄무늬 정장의 예리한 브이 포즈로 적을 찌른다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "슈트 깃 정돈",
+          "description": "단정한 정장 핏을 가다듬으며 견고한 방어막을 친다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "승리 브이 압수령",
+          "description": "승리의 환호를 사방에 터뜨려 모든 적의 전의를 꺾고 피해를 준다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v014",
+      "skills": [
+        {
+          "level": 5,
+          "name": "냥냥 앞발 긁기",
+          "description": "고양이 필터 장착 상태로 적을 날카롭게 연속 할퀸다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 10,
+          "name": "창밖 빗물 치유",
+          "description": "버스 창가에 흐르는 빗소리를 들으며 체력을 회복한다.",
+          "archetype": "heal"
+        },
+        {
+          "level": 15,
+          "name": "좌석 폭우 소환",
+          "description": "머리 위로 쏟아지는 고양이비를 폭우로 바꿔 적 전체를 적신다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v015",
+      "skills": [
+        {
+          "level": 5,
+          "name": "알고리즘 혼란탄",
+          "description": "미궁 같은 검색 결과를 던져 적의 판단을 흐린다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "닮은꼴 난사",
+          "description": "화면에 뜬 수많은 얼굴로 적을 연속 공격한다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 15,
+          "name": "결과 없음 오류",
+          "description": "검색 결과를 미확정 처리해 적의 방어 태세를 완전히 무너뜨린다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v016",
+      "skills": [
+        {
+          "level": 5,
+          "name": "물밑 시선 쏘기",
+          "description": "수면선 바로 위에서 쏘아보는 날카로운 눈빛으로 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "반잠수 은신막",
+          "description": "물밑으로 몸을 반쯤 숨겨 상대의 공격을 차단하는 보호막을 얻는다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "수면 분출 잠복타",
+          "description": "물속에서 기습적으로 솟구쳐 적을 후려치고 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v017",
+      "skills": [
+        {
+          "level": 5,
+          "name": "초침 연속 틱톡",
+          "description": "흘러가는 초침 소리에 맞춰 적을 빠르게 2회 쪼아댄다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 10,
+          "name": "3시간의 인내",
+          "description": "기나긴 대기 시간을 견뎌내며 서서히 생명력을 재생한다.",
+          "archetype": "regen"
+        },
+        {
+          "level": 15,
+          "name": "타임아웃 냥냥펀치",
+          "description": "3시간 33분을 꽉 채운 분노를 담아 적 전체를 휩쓴다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v018",
+      "skills": [
+        {
+          "level": 5,
+          "name": "왜곡 미소 들이밀기",
+          "description": "화면을 꽉 채운 팽창 미소로 적에게 충격을 준다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "화면 가득 사기충천",
+          "description": "압도적인 얼굴 면적으로 아군의 기세를 높여 공격력을 올린다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "픽셀 폭주 파안대소",
+          "description": "화면 프레임을 부수고 터져 나오는 웃음으로 적 전체를 타격한다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v019",
+      "skills": [
+        {
+          "level": 5,
+          "name": "나른한 렌즈 닦기",
+          "description": "안경을 쓱 닦으며 방심한 적의 빈틈을 친다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "평온한 후드 휴식",
+          "description": "포근한 회색 후드 속에서 호흡을 가다듬어 체력을 회복한다.",
+          "archetype": "heal"
+        },
+        {
+          "level": 15,
+          "name": "김서림 무장해제",
+          "description": "자욱한 김서림으로 전장을 채워 적의 방어력을 크게 떨어뜨린다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v020",
+      "skills": [
+        {
+          "level": 5,
+          "name": "푸른빛 심해 레이저",
+          "description": "푸른 모노크롬 안광으로 적을 강하게 꿰뚫는다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "치명적 시스템 오류",
+          "description": "푸른빛 오류 화면을 띄워 적의 방어 루틴을 붕괴시킨다.",
+          "archetype": "def_down"
+        },
+        {
+          "level": 15,
+          "name": "심해 블루스크린",
+          "description": "차가운 오류 신호로 적의 신경망을 멈춰 세워 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v021",
+      "skills": [
+        {
+          "level": 5,
+          "name": "성탄 오너먼트 투척",
+          "description": "트리 장식 방울을 빠르게 연속 던져 타격한다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 10,
+          "name": "트리 전구 버프",
+          "description": "반짝이는 트리 불빛의 온기로 공격력을 강화한다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "열손가락 성탄 결계",
+          "description": "트리 앞 마법진을 완성하여 적 전체를 휩쓰는 축복의 빛을 뿜는다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v022",
+      "skills": [
+        {
+          "level": 5,
+          "name": "가시꽃 찌르기",
+          "description": "꽃다발 속에 숨겨둔 예리한 줄기로 적을 찌른다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "풍성한 꽃잎 방벽",
+          "description": "얼굴을 완벽히 가리는 거대한 꽃다발로 보호막을 생성한다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "축하 꽃가루 폭탄",
+          "description": "사방으로 터지는 알레르기 꽃가루로 적 전체를 중독시킨다.",
+          "archetype": "poison"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v023",
+      "skills": [
+        {
+          "level": 5,
+          "name": "판넬 모서리 찍기",
+          "description": "단단한 안내 판넬의 각진 모서리로 적을 찍어 누른다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "우드 판넬 가림막",
+          "description": "넓은 판넬 뒤로 몸을 숨겨 든든한 방어막을 친다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "주의문구 들이밀기",
+          "description": "판넬의 거대한 글귀로 적의 눈을 가로막아 방어력을 낮춘다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v024",
+      "skills": [
+        {
+          "level": 5,
+          "name": "침묵의 무표정 쨉",
+          "description": "미동조차 없는 냉담한 얼굴로 적의 옆구리를 친다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "블랙 티셔츠 흡수",
+          "description": "칠흑 같은 옷으로 전장의 빛을 머금어 체력을 지속 회복한다.",
+          "archetype": "regen"
+        },
+        {
+          "level": 15,
+          "name": "거리 속 군중 동화",
+          "description": "배경 인물처럼 완전히 사라져 적의 방어 태세를 무력화한다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v025",
+      "skills": [
+        {
+          "level": 5,
+          "name": "블러 블로우",
+          "description": "초점이 나간 흐릿한 주먹을 빠르게 꽂아 넣는다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "소프트 포커스 은폐",
+          "description": "윤곽선을 뭉개 카메라와 적의 시선을 피하는 보호막을 두른다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "모션 블러 혼란",
+          "description": "잔상이 흔들리는 격렬한 움직임으로 적을 어지럽혀 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v026",
+      "skills": [
+        {
+          "level": 5,
+          "name": "비대칭 입꼬리 찌르기",
+          "description": "한쪽만 씩 올라간 미소로 적의 심리를 긁으며 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "의기양양 미소 버프",
+          "description": "완벽한 프레임 안착에 만족하며 공격력을 증폭시킨다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "기묘한 웃음 음파",
+          "description": "규칙을 벗어난 기묘한 미소의 파동으로 적 전체를 공격한다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v027",
+      "skills": [
+        {
+          "level": 5,
+          "name": "콧구멍 빔 발사",
+          "description": "천장을 향해 열린 콧구멍에서 강력한 광선을 쏜다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "풀바 와이파이 수신",
+          "description": "우주와 통신하는 5G 신호를 받아 공격력을 끌어올린다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "수직 전파 방해파",
+          "description": "천장을 뚫고 퍼지는 고주파 소음으로 적 전체를 강타한다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v028",
+      "skills": [
+        {
+          "level": 5,
+          "name": "프랙탈 쪼기",
+          "description": "복제된 입술들이 연달아 달려들어 적을 연속으로 쫀다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 10,
+          "name": "무한 구강 독성 침",
+          "description": "겹겹이 복제된 입에서 뿜어져 나오는 유독성 침을 뱉는다.",
+          "archetype": "poison"
+        },
+        {
+          "level": 15,
+          "name": "합창단 콰르텟 샤우팅",
+          "description": "수십 개의 입이 동시에 내지르는 합창으로 적을 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v029",
+      "skills": [
+        {
+          "level": 5,
+          "name": "블랙홀 입 흡입타",
+          "description": "넓게 열린 입으로 적을 끌어당겨 충격을 준다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "포털 밖 간식 섭취",
+          "description": "열린 입으로 주변 영양분을 빨아들여 체력을 회복한다.",
+          "archetype": "heal"
+        },
+        {
+          "level": 15,
+          "name": "최대개방 포털 쇼크",
+          "description": "차원문급으로 벌어진 구강의 위압감으로 적의 방어를 무너뜨린다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v030",
+      "skills": [
+        {
+          "level": 5,
+          "name": "철벽 등판 밀치기",
+          "description": "넓고 단단한 등을 들이받아 적을 튕겨낸다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "태평양 등판 방패",
+          "description": "철벽같은 회색 맨투맨 등판으로 견고한 보호막을 세운다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "돌아서지 않는 침묵",
+          "description": "어떤 공격도 뒤돌아보지 않고 버티며 체력을 지속 회복한다.",
+          "archetype": "regen"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v031",
+      "skills": [
+        {
+          "level": 5,
+          "name": "압축 스파크 샷",
+          "description": "좁은 세로 화면 속에 응축된 전류를 발사한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "저화질 전압 상승",
+          "description": "거친 픽셀 사이로 솟구치는 전압으로 공격력을 높인다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "왕관 벼락 낙하",
+          "description": "높게 솟은 머리카락 안테나로 벼락을 내리꽂아 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v032",
+      "skills": [
+        {
+          "level": 5,
+          "name": "천장 낙하 냥펀치",
+          "description": "벽 모서리에서 뛰어내리며 적을 기습 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "여백의 고양이 발톱",
+          "description": "빈 공간을 날카롭게 할퀴며 연속으로 적을 베어낸다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 15,
+          "name": "천장 공간 독점령",
+          "description": "방 전체의 빈 공간을 장악해 모든 적에게 압박 피해를 준다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v033",
+      "skills": [
+        {
+          "level": 5,
+          "name": "웜홀 왜곡 타격",
+          "description": "뒤통수 포털을 통과한 주먹으로 적의 허를 찌른다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "차원 에너지 역류",
+          "description": "차원문 너머에서 유독한 시공간 독기를 뿜어 중독시킨다.",
+          "archetype": "poison"
+        },
+        {
+          "level": 15,
+          "name": "후두부 블랙홀 붕괴",
+          "description": "모든 것을 빨아들이는 웜홀을 열어 적의 방어선을 분쇄한다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v034",
+      "skills": [
+        {
+          "level": 5,
+          "name": "고글 반사 눈부심",
+          "description": "설원의 햇빛을 고글로 반사시켜 적의 눈을 찌른다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "바이저 코팅 쉴드",
+          "description": "눈보라를 막아주는 고글 코팅막으로 보호막을 두른다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "슬로프 전방위 스캔",
+          "description": "바이저에 투영된 설원 지형을 읽어 적 전원에게 일격을 날린다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v035",
+      "skills": [
+        {
+          "level": 5,
+          "name": "원형 테두리 박치기",
+          "description": "프레임 모서리를 둥글게 들이받아 적을 친다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "봉인 해제 사기충천",
+          "description": "작은 원을 뚫고 나오는 존재감으로 공격력을 대폭 높인다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "프레임 압축 감금",
+          "description": "적을 원형 크롭 속에 구겨 넣어 행동을 봉쇄하고 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v036",
+      "skills": [
+        {
+          "level": 5,
+          "name": "정숙한 플래시 블로우",
+          "description": "사진관 조명 속에서 침착하게 적의 급소를 찌른다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "정장 차림 명상",
+          "description": "단정한 자세로 호흡을 가다듬으며 체력을 지속 회복한다.",
+          "archetype": "regen"
+        },
+        {
+          "level": 15,
+          "name": "눈부신 역광 안개",
+          "description": "조명 반사광을 눈부시게 터뜨려 적의 방어 태세를 마비시킨다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v037",
+      "skills": [
+        {
+          "level": 5,
+          "name": "쇠숟가락 연속 난타",
+          "description": "식당 숟가락으로 적을 경쾌하게 연속 두드린다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 10,
+          "name": "맛집 안테나 식탐",
+          "description": "메뉴판에서 영양을 감지해 든든하게 체력을 회복한다.",
+          "archetype": "heal"
+        },
+        {
+          "level": 15,
+          "name": "풀코스 주문 폭격",
+          "description": "수신된 메뉴들을 한꺼번에 쏟아붓듯 적 전체를 타격한다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v038",
+      "skills": [
+        {
+          "level": 5,
+          "name": "물수제비 튕기기",
+          "description": "수면 위에 뜬 채 물을 튕겨 적을 찰싹 때린다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "파도풀 완충 배리어",
+          "description": "구명조끼의 잔잔한 부력으로 피해를 흡수하는 보호막을 만든다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "수면 동면 힐링",
+          "description": "파도에 몸을 맡기고 깊은 휴식에 들어 지속 회복한다.",
+          "archetype": "regen"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v039",
+      "skills": [
+        {
+          "level": 5,
+          "name": "메롱 도발 찌르기",
+          "description": "약 올리는 혀 내밀기로 적의 신경을 긁어 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "퇴근 본능 가속",
+          "description": "집에 가겠다는 일념 하나로 내면의 공격력을 폭발시킨다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "하차 벨 칼퇴 충격파",
+          "description": "종례가 끝나자마자 튀어나가는 돌진으로 적 전체를 휩쓴다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v040",
+      "skills": [
+        {
+          "level": 5,
+          "name": "정중한 손날치기",
+          "description": "합장한 손을 모아 예의 바르게 적의 빈틈을 친다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "기도의 평온함",
+          "description": "두 손을 모으고 차분히 마음을 달래며 체력을 회복한다.",
+          "archetype": "heal"
+        },
+        {
+          "level": 15,
+          "name": "강제 휴전 테이블",
+          "description": "엄숙한 합장 기운으로 전장을 압도해 적의 방어력을 깎는다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v041",
+      "skills": [
+        {
+          "level": 5,
+          "name": "육성 샤우팅 펀치",
+          "description": "객차가 쩌렁쩌렁 울리도록 소리를 질러 적을 타격한다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "도곡행 안내방송",
+          "description": "무인 지하철 스피커를 찢는 방송으로 적 전체를 강타한다.",
+          "archetype": "aoe"
+        },
+        {
+          "level": 15,
+          "name": "메가폰 음파 쇼크",
+          "description": "귀가 먹먹해지는 초고음 음파로 적의 고막을 마비시켜 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v042",
+      "skills": [
+        {
+          "level": 5,
+          "name": "이중 셔터 클릭",
+          "description": "화면 안팎에서 연달아 셔터를 터뜨려 적을 연속 타격한다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 10,
+          "name": "렌즈 액정 차단막",
+          "description": "스마트폰 화면을 방패 삼아 들어오는 공격을 막는 보호막을 친다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "재귀 촬영 왜곡",
+          "description": "화면 속 화면을 끝없이 겹쳐 적의 방어선을 혼돈에 빠뜨린다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v043",
+      "skills": [
+        {
+          "level": 5,
+          "name": "패딩 어깨 밀치기",
+          "description": "빵빵한 롱패딩 어깨로 묵직하게 들이받는다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "지퍼 끝까지 올리기",
+          "description": "패딩 지퍼를 턱 끝까지 채워 완벽한 보호막을 형성한다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "동면 절전 충전",
+          "description": "패딩 속 온기를 머금고 깊은 수면에 들어 지속 회복한다.",
+          "archetype": "regen"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v044",
+      "skills": [
+        {
+          "level": 5,
+          "name": "네모난 엄지 척",
+          "description": "거칠게 뭉개진 저해상도 엄지로 적을 쿡 찌른다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "따봉 합격 통보",
+          "description": "확실한 엄지 승인으로 자신감을 충전해 공격력을 높인다.",
+          "archetype": "atk_up"
+        },
+        {
+          "level": 15,
+          "name": "저해상도 모자이크",
+          "description": "픽셀 뭉개기로 적의 방어 태세를 알아볼 수 없게 망가뜨린다.",
+          "archetype": "def_down"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v045",
+      "skills": [
+        {
+          "level": 5,
+          "name": "세로 압축 킥",
+          "description": "아래위로 꾹 눌린 반사면의 탄력으로 적을 걷어찬다.",
+          "archetype": "strike"
+        },
+        {
+          "level": 10,
+          "name": "늘어난 파란 후드",
+          "description": "리사이즈된 후드의 면적으로 자신에게 튼튼한 보호막을 감싼다.",
+          "archetype": "shield"
+        },
+        {
+          "level": 15,
+          "name": "화면 비율 왜곡파",
+          "description": "거울면 왜곡 필터를 전장에 풀어 적 전체를 납작하게 누른다.",
+          "archetype": "aoe"
+        }
+      ]
+    },
+    {
+      "cardId": "imsingyu-v046",
+      "skills": [
+        {
+          "level": 5,
+          "name": "연속 고개 떨구기",
+          "description": "반복되는 꾸벅임의 리듬으로 적을 2회 연속 타격한다.",
+          "archetype": "multihit"
+        },
+        {
+          "level": 10,
+          "name": "무한 루프 숙면",
+          "description": "끝없는 GIF 프레임 속에서 쪽잠을 자며 생명력을 지속 회복한다.",
+          "archetype": "regen"
+        },
+        {
+          "level": 15,
+          "name": "영원한 졸음 전염",
+          "description": "멈추지 않는 수면 파동을 퍼뜨려 적을 깊은 잠에 빠뜨려 기절시킨다.",
+          "archetype": "stun"
+        }
+      ]
+    }
+  ]
+}

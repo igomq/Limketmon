@@ -55,6 +55,17 @@ export function isHardPity(counter: number): boolean {
   return counter + 1 >= HARD_PITY_AT;
 }
 
+/** UR chance on the guaranteed pull; SSR takes the rest so the two always sum to one. */
+export const HARD_PITY_UR_CHANCE = 0.22;
+
+/** The guaranteed-pull odds. Shared with the UI so the shown table matches the real draw. */
+export function hardPityOdds(): OddsTable {
+  return [
+    ['UR', HARD_PITY_UR_CHANCE],
+    ['SSR', 1 - HARD_PITY_UR_CHANCE]
+  ];
+}
+
 /**
  * Odds for the next pull given the number of consecutive non-SSR+ pulls so far.
  * Always normalised: the weights sum to 1.
@@ -79,13 +90,29 @@ export function pityOdds(counter: number): OddsTable {
 
 /** Rarity for one pull, honouring soft and hard pity. */
 export function rollRarityWithPity(roll: number, counter: number): Rarity {
-  if (isHardPity(counter)) return roll < 0.22 ? 'UR' : 'SSR';
+  if (isHardPity(counter)) return roll < HARD_PITY_UR_CHANCE ? 'UR' : 'SSR';
   let total = 0;
   for (const [rarity, weight] of pityOdds(counter)) {
     total += weight;
     if (roll < total) return rarity;
   }
   return 'N';
+}
+
+/**
+ * Rarity for a guaranteed-pull ticket: never weaker than `min`, otherwise the base weight ratios
+ * among the allowed rarities. Independent of the normal pity ladder by design.
+ */
+export function rollGuaranteedRarity(roll: number, min: 'SR' | 'SSR'): Rarity {
+  const allowed: Rarity[] = min === 'SSR' ? ['SSR', 'UR'] : ['SR', 'SSR', 'UR'];
+  const pool = RARITY_WEIGHTS.filter(([rarity]) => allowed.includes(rarity));
+  const total = pool.reduce((sum, [, weight]) => sum + weight, 0);
+  let cumulative = 0;
+  for (const [rarity, weight] of pool) {
+    cumulative += weight / total;
+    if (roll < cumulative) return rarity;
+  }
+  return allowed[allowed.length - 1]!;
 }
 
 /** Pity carries over across days and devices; only an SSR+ resets it. */

@@ -1,11 +1,12 @@
 'use client';
 
 import { motion, useDragControls, useMotionTemplate, useMotionValue, useReducedMotion, useSpring, animate } from 'motion/react';
-import { useEffect, useId, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { memo, useEffect, useId, useRef, useState, type PointerEvent, type ReactNode } from 'react';
 import type { Card } from '../lib/cards';
 import { battleStats } from '../lib/battle/stats';
+import { enhanceSkillsForCard, scaleAbility } from '../lib/battle/enhance-skills';
 import { applyEnhance, canEnhance, enhanceCost, MAX_ENHANCE } from '../lib/enhance';
-import { ELEMENT_LABEL, STATUS_LABEL, type AbilityOp } from '../lib/battle/types';
+import { ELEMENT_LABEL, STATUS_LABEL, type AbilityOp, type CardBattleStats } from '../lib/battle/types';
 import { cardTitle, projectedPosition } from '../lib/collection';
 
 export const spring = { type: 'spring' as const, stiffness: 360, damping: 34, mass: 0.9 };
@@ -36,7 +37,30 @@ export function Brand({ children }: { children?: ReactNode }) {
   return <><span className="brand-symbol" aria-hidden="true"><i /><i /><i /><i /></span><span>limketmon<span className="brand-period">.</span></span>{children}</>;
 }
 
-export function CardArtwork({ card, quantity = 0, enhanceLevel = 0, priority = false }: { card: Card; quantity?: number; enhanceLevel?: number; priority?: boolean }) {
+type CardArtworkProps = { card: Card; quantity?: number; enhanceLevel?: number; priority?: boolean };
+
+/**
+ * Grid/list preview: plain DOM, no springs, pointer tracking or foil layers. The archive renders
+ * one per card, so a per-card spring + two motion layers was the biggest idle cost on the page.
+ */
+export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantity = 0, enhanceLevel = 0, priority = false }: CardArtworkProps) {
+  const thumbKey = card.imageKey ? `${card.imageKey.replace(/\.[^.]+$/, "")}.webp` : "";
+  return (
+    <div className={`card-art rarity-${card.rarity}`}>
+      <img src={`/cards/thumbs/${thumbKey}`} alt={cardTitle(card)} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : undefined} decoding="async" draggable={false} />
+      <div className="card-shade" />
+      <span className="card-edition">LIMKETMON <span>ORIGINALS</span></span>
+      <span className="card-rarity">{card.rarity}<Icon name="sparkle" /></span>
+      <div className="card-caption"><span>No. {String(card.version).padStart(3, '0')}</span><strong>{cardTitle(card)}</strong><small>{card.skillName}</small></div>
+      {quantity > 1 && <span className="card-quantity">×{quantity}</span>}
+      {enhanceLevel > 0 && <span className="card-enhance">+{enhanceLevel}</span>}
+      <span className="card-frame" />
+    </div>
+  );
+});
+
+/** Tilt + foil: only the one or two cards the player is actively looking at (detail, pull reveal). */
+function InteractiveCardArtwork({ card, quantity = 0, enhanceLevel = 0, priority = false }: CardArtworkProps) {
   const reduced = useReducedMotion();
   const rx = useSpring(0, gentleSpring);
   const ry = useSpring(0, gentleSpring);
@@ -79,19 +103,26 @@ export function CardArtwork({ card, quantity = 0, enhanceLevel = 0, priority = f
   );
 }
 
+export function CardArtwork({ interactive = false, ...props }: CardArtworkProps & { interactive?: boolean }) {
+  return interactive ? <InteractiveCardArtwork {...props} /> : <StaticCardArtwork {...props} />;
+}
+
 export function CardButton({ card, quantity = 0, enhanceLevel = 0, onClick, priority = false }: { card: Card; quantity?: number; enhanceLevel?: number; onClick: () => void; priority?: boolean }) {
-  const reduced = useReducedMotion();
-  return <motion.button className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장` : '카드 미리보기'}`} whileHover={reduced ? undefined : { y: -5 }} whileTap={reduced ? undefined : { scale: 0.97 }} transition={spring}><CardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority={priority} /></motion.button>;
+  return <button type="button" className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장` : '카드 미리보기'}`}><StaticCardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority={priority} /></button>;
 }
 
 export function CardBack({ count = 1 }: { count?: number }) {
-  return <div className="card-back"><div className="back-top"><span>100% LIM SINGYU</span><span>VOL. 01</span></div><div className="back-center"><Brand /><span>또 너냐, 임신규.</span></div><div className="back-bottom"><span>{count === 5 ? 'FIVE CARDS' : 'ONE CARD'}<br />열어도 임신규. 또 열어도 임신규.</span><Icon name="sparkle" /></div></div>;
+  const deck = count >= 10 ? 'TEN CARDS' : count === 5 ? 'FIVE CARDS' : 'ONE CARD';
+  return <div className="card-back"><div className="back-top"><span>100% LIM SINGYU</span><span>VOL. 01</span></div><div className="back-center"><Brand /><span>또 너냐, 임신규.</span></div><div className="back-bottom"><span>{deck}<br />열어도 임신규. 또 열어도 임신규.</span><Icon name="sparkle" /></div></div>;
 }
 
 /** Battle numbers for the detail sheet. Derived from lib, so the sheet never re-implements rules. */
 function BattleCardPanel({ card, enhanceLevel = 0 }: { card: Card; enhanceLevel?: number }) {
   const base = battleStats(card);
-  const stats = applyEnhance(base, enhanceLevel);
+  const stats = applyEnhance(base, enhanceLevel, card.rarity);
+  const next = enhanceLevel < MAX_ENHANCE ? applyEnhance(base, enhanceLevel + 1, card.rarity) : null;
+  // The combatant's real signature: the raw catalog numbers scaled to the card's own stats.
+  const signature = scaleAbility(stats.ability, card.rarity, enhanceLevel);
   const rows: Array<[string, string, number]> = [
     ['체력', String(stats.maxHp), stats.maxHp - base.maxHp],
     ['공격', String(stats.atk), stats.atk - base.atk],
@@ -100,6 +131,10 @@ function BattleCardPanel({ card, enhanceLevel = 0 }: { card: Card; enhanceLevel?
     ['치명타', stats.crit + '%', stats.crit - base.crit],
     ['속성', ELEMENT_LABEL[stats.element], 0]
   ];
+  // Shared rarity-aware curve (lib/enhance.ts), so the preview can never drift from the server.
+  const gains = next
+    ? ([['체력', next.maxHp - stats.maxHp], ['공격', next.atk - stats.atk], ['방어', next.def - stats.def], ['속도', next.spd - stats.spd], ['치명타', next.crit - stats.crit]] as Array<[string, number]>).filter(([, delta]) => delta > 0)
+    : [];
   return (
     <div className="battle-card-panel">
       <span className="eyebrow">BATTLE PROFILE{enhanceLevel ? ' · +' + enhanceLevel : ''}</span>
@@ -110,14 +145,58 @@ function BattleCardPanel({ card, enhanceLevel = 0 }: { card: Card; enhanceLevel?
       </dl>
       <p className="battle-card-skill">
         <Icon name="sparkle" />
-        <span>기운 <strong>{stats.cost}</strong> 소모{stats.ability.cooldown > 0 ? ` · 재사용 ${stats.ability.cooldown}턴` : ' · 쿨다운 없음'} · {describeOps(stats.ability.ops)}</span>
+        <span>기운 <strong>{stats.cost}</strong> 소모{signature.cooldown > 0 ? ` · 재사용 ${signature.cooldown}턴` : ' · 쿨다운 없음'} · {describeOps(signature.ops)}</span>
+      </p>
+      <p className="battle-card-next">
+        <Icon name="sparkle" />
+        <span>{next
+          ? <>다음 <strong>+{enhanceLevel + 1}</strong> 강화 시 {gains.length ? gains.map(([label, delta]) => `${label} +${delta}`).join(' · ') : '추가 상승 없음'} <small>등급별 곡선 근사치</small></>
+          : '최대 강화 단계입니다.'}</span>
+      </p>
+      <EnhanceSkillPanel card={card} stats={stats} enhanceLevel={enhanceLevel} />
+    </div>
+  );
+}
+
+/**
+ * The card's +5 / +10 / +15 unlocks, ops included, so the sheet never claims an effect the DSL
+ * does not have. Locked entries stay visible (name, level, plain-Korean ops) so a player can plan.
+ * Every unlocked skill spends the same energy pool and shares the one combatant cooldown counter.
+ */
+function EnhanceSkillPanel({ card, stats, enhanceLevel }: { card: Card; stats: CardBattleStats; enhanceLevel: number }) {
+  const skills = enhanceSkillsForCard(card, stats);
+  if (!skills.length) return null;
+  const next = skills.find((skill) => skill.level > enhanceLevel);
+  return (
+    <div className="enhance-skill-panel">
+      <span className="eyebrow">해금 기술 · +5 / +10 / +15</span>
+      <p className="enhance-skill-intro">강화 단계가 오르면 카드 전용 기술이 열립니다. 모든 기술은 기운과 재사용 대기를 함께 씁니다.</p>
+      <ul className="enhance-skill-list">
+        {skills.map((skill) => {
+          const unlocked = skill.level <= enhanceLevel;
+          return (
+            <li key={skill.ability.id} data-locked={!unlocked}>
+              <div className="enhance-skill-head">
+                <strong>{skill.ability.name}</strong>
+                <span className="enhance-skill-level">{unlocked ? `강화 +${skill.level} · 사용 가능` : `강화 +${skill.level}에서 해금`}</span>
+              </div>
+              <p className="enhance-skill-ops"><Icon name="sparkle" />기운 {skill.ability.cost}{skill.ability.cooldown > 0 ? ` · 재사용 ${skill.ability.cooldown}턴` : ''} · {describeOps(skill.ability.ops)}</p>
+              <p className="enhance-skill-flavor">{skill.flavor}</p>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="enhance-skill-next">
+        {next
+          ? <>다음 <strong>+{next.level}</strong> 강화에서 <strong>{next.ability.name}</strong> 기술이 열립니다.</>
+          : '모든 해금 기술을 사용할 수 있습니다.'}
       </p>
     </div>
   );
 }
 
 /** One plain-Korean line for what the skill does, taken straight from the ability data. */
-function describeOps(ops: readonly AbilityOp[]): string {
+export function describeOps(ops: readonly AbilityOp[]): string {
   return ops
     .map((op) => {
       switch (op.op) {
@@ -170,7 +249,7 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
         <button className="sheet-handle" aria-label="아래로 끌어 닫기, 또는 눌러 닫기" onPointerDown={(event) => { dragged.current = false; drag.start(event); }} onClick={(event) => { if (!dragged.current || event.detail === 0) onClose(); }}><span /></button>
         <div className="detail-scroll">
         
-        <div className="detail-art"><CardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority /><p><Icon name="hand" />카드에 손을 대고 빛을 움직여 보세요</p></div>
+        <div className="detail-art"><CardArtwork card={card} quantity={quantity} enhanceLevel={enhanceLevel} priority interactive /><p><Icon name="hand" />카드에 손을 대고 빛을 움직여 보세요</p></div>
         <div className="detail-copy"><div className="detail-meta"><span className={`rarity-tag rarity-${card.rarity}`}>{card.rarity}</span><span>NO. {String(card.version).padStart(3, '0')} / ORIGINALS</span></div>
           <h2 id={titleId}>{cardTitle(card)}</h2><p className="detail-name">{card.name}</p>
           <div className="skill-block"><span className="eyebrow">SPECIAL ABILITY</span><h3>{card.skillName}</h3><p>{card.skillDescription}</p></div>
@@ -180,7 +259,7 @@ export function CardDetail({ card, quantity, enhanceLevel = 0, obtainedAt, onEnh
           {quantity > 0 && (
             <div className="enhance-panel">
               <span className="eyebrow">ENHANCE</span>
-              <p>같은 카드를 소모해 전투 수치를 올립니다. 단계가 오를수록 더 많이 필요합니다.</p>
+              <p>같은 카드를 소모해 전투 수치를 올립니다. 단계가 오를수록 더 많이 필요하고, 표시 수치는 등급별 곡선에 따른 근사치입니다.</p>
               <p className="enhance-level">{enhanceLevel ? '강화 +' + enhanceLevel + ' / +' + MAX_ENHANCE : '아직 강화하지 않음'}</p>
               {onEnhance ? (
                 <button

@@ -12,14 +12,15 @@ export async function POST(request: Request) {
     if (!body || typeof body !== 'object' || Array.isArray(body) || !('action' in body)) {
       return NextResponse.json({ error: '요청을 확인해주세요.' }, { status: 400 });
     }
-    const payload = body as { action?: unknown; deckId?: unknown; opponentId?: unknown; kind?: unknown; battleId?: unknown; decisions?: unknown };
+    const payload = body as { action?: unknown; deckId?: unknown; opponentId?: unknown; kind?: unknown; mode?: unknown; battleId?: unknown; decisions?: unknown };
     await ensureUser(user.userId, user.email);
     switch (payload.action) {
       case 'start': {
         const setup = await startBattle(user.userId, {
           deckId: payload.deckId,
           opponentId: payload.opponentId,
-          kind: payload.kind
+          kind: payload.kind,
+          mode: payload.mode
         });
         return NextResponse.json({ setup });
       }

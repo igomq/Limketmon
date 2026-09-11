@@ -19,7 +19,10 @@ export const userGameState = sqliteTable(
     pullCredits: integer('pull_credits').notNull().default(0),
     lastFreePullDate: text('last_free_pull_date'),
     // Consecutive pulls since the last SSR-or-better. Drives soft and hard pity.
-    pityCounter: integer('pity_counter').notNull().default(0)
+    pityCounter: integer('pity_counter').notNull().default(0),
+    // Guaranteed-pull tickets. Distinct balances: a ticket pull can never spend normal credits.
+    srTickets: integer('sr_tickets').notNull().default(0),
+    ssrTickets: integer('ssr_tickets').notNull().default(0)
   },
   (table) => [
     check('chk_user_game_state_credits', sql`${table.pullCredits} >= 0`)
@@ -51,13 +54,18 @@ export const couponRedemptions = sqliteTable(
   (table) => [primaryKey({ columns: [table.userId, table.couponCode] })]
 );
 
-export const pullHistory = sqliteTable('pull_history', {
-  id: text('id').primaryKey(),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  cardId: text('card_id').notNull(),
-  rarity: text('rarity').notNull(),
-  pulledAt: text('pulled_at').notNull()
-});
+export const pullHistory = sqliteTable(
+  'pull_history',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    cardId: text('card_id').notNull(),
+    rarity: text('rarity').notNull(),
+    pulledAt: text('pulled_at').notNull()
+  },
+  // Every read filters by user first (count + per-rarity totals), so the index is on user_id.
+  (table) => [index('idx_pull_history_user').on(table.userId)]
+);
 
 export const decks = sqliteTable(
   'decks',
@@ -97,6 +105,8 @@ export const battles = sqliteTable(
     id: text('id').primaryKey(),
     userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     kind: text('kind').notNull().default('pve'),
+    // Difficulty mode the battle was started under. Replay/finish re-derive the opponent from it.
+    mode: text('mode').notNull().default('normal'),
     opponentId: text('opponent_id').notNull(),
     deckId: text('deck_id'),
     rulesetVersion: integer('ruleset_version').notNull(),
@@ -143,6 +153,9 @@ export const rewardClaims = sqliteTable(
     userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     claimKey: text('claim_key').notNull(),
     credits: integer('credits').notNull().default(0),
+    // Ticket payouts ride the same idempotency gate: one claim row, credits 0, ticket_type set.
+    ticketType: text('ticket_type'),
+    ticketQuantity: integer('ticket_quantity').notNull().default(0),
     battleId: text('battle_id'),
     claimedAt: text('claimed_at').notNull()
   },

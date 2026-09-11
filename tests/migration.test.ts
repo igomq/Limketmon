@@ -42,12 +42,27 @@ test('every migration applies to a fresh database and creates the full schema', 
       'users'
     ]);
     // The columns the game layer writes must exist, with the defaults the code assumes.
-    assert.deepEqual(columns(sql, 'user_game_state').sort(), ['last_free_pull_date', 'pity_counter', 'pull_credits', 'user_id']);
+    assert.deepEqual(columns(sql, 'user_game_state').sort(), [
+      'last_free_pull_date',
+      'pity_counter',
+      'pull_credits',
+      'sr_tickets',
+      'ssr_tickets',
+      'user_id'
+    ]);
     assert.ok(columns(sql, 'battles').includes('decisions'));
     assert.ok(columns(sql, 'battles').includes('summary'));
     assert.ok(columns(sql, 'battles').includes('clutch'));
     assert.ok(columns(sql, 'battles').includes('ruleset_version'));
+    assert.ok(columns(sql, 'battles').includes('mode'));
     assert.ok(columns(sql, 'inventory').includes('enhance_level'));
+    // The 0003 delta must not re-add the column 0002 already created.
+    assert.equal(columns(sql, 'inventory').filter((name) => name === 'enhance_level').length, 1);
+    assert.ok(columns(sql, 'reward_claims').includes('ticket_type'));
+    assert.ok(columns(sql, 'reward_claims').includes('ticket_quantity'));
+    // Every pull_history read filters by user, so the index must exist on user_id.
+    const pullIndexes = (sql.prepare("PRAGMA index_list('pull_history')").all() as Array<{ name: string }>).map((row) => row.name);
+    assert.ok(pullIndexes.includes('idx_pull_history_user'), 'pull_history needs a user_id index');
     const defaults = new Map(
       (sql.prepare('PRAGMA table_info(battles)').all() as Array<{ name: string; dflt_value: string | null }>).map((row) => [row.name, row.dflt_value])
     );
@@ -80,14 +95,18 @@ test('migrations are additive: existing rows and tables survive the upgrade', ()
 
     for (const file of files.slice(1)) migrate({ exec: (statement: string) => sql.exec(statement) }, sqlOf(file));
 
-    const state = sql.prepare('SELECT pull_credits, last_free_pull_date, pity_counter FROM user_game_state WHERE user_id = ?').get('u1') as {
+    const state = sql.prepare('SELECT pull_credits, last_free_pull_date, pity_counter, sr_tickets, ssr_tickets FROM user_game_state WHERE user_id = ?').get('u1') as {
       pull_credits: number;
       last_free_pull_date: string;
       pity_counter: number;
+      sr_tickets: number;
+      ssr_tickets: number;
     };
     assert.equal(state.pull_credits, 42, 'credits survive');
     assert.equal(state.last_free_pull_date, '2026-09-09', 'the KST free-pull date survives');
     assert.equal(state.pity_counter, 0, 'existing accounts start with a clean pity counter');
+    assert.equal(state.sr_tickets, 0, 'new ticket columns backfill at 0');
+    assert.equal(state.ssr_tickets, 0, 'new ticket columns backfill at 0');
     assert.equal((sql.prepare('SELECT quantity FROM inventory WHERE user_id = ?').get('u1') as { quantity: number }).quantity, 3);
     assert.equal((sql.prepare('SELECT enhance_level FROM inventory WHERE user_id = ?').get('u1') as { enhance_level: number }).enhance_level, 0);
     assert.equal((sql.prepare('SELECT COUNT(*) AS c FROM pull_history').get() as { c: number }).c, 1);

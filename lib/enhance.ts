@@ -1,7 +1,25 @@
 // Duplicate-card enhance. Pure data: cost, clamp, stat mul. Server writes; clients only display.
-export const MAX_ENHANCE = 5;
-/** +8% HP/ATK/DEF per level. Level 5 returns a nerfed base card to about its old raw stats. */
-export const ENHANCE_PER_LEVEL = 0.08;
+import type { Rarity } from './rules.ts';
+
+export const MAX_ENHANCE = 15;
+
+/**
+ * Normalized power band per rarity. The curves are tuned so equal landmarks line up:
+ * N5=R3=SR0, N10=R5=SR2=SSR0, N15=R10=SR6=SSR3=UR0. They are abstract units, not raw stats:
+ * battleStats anchors each rarity to its level-0 band and applyEnhance scales by the ratio.
+ */
+const POWER_CURVE: Record<Rarity, (level: number) => number> = {
+  N: (level) => 1 + 0.08 * level + 0.006 * level * level,
+  R: (level) => 1.25 + 0.1 * level + 0.013 * level * level,
+  SR: (level) => 1.55 + 0.3 * level + 0.006 * level * level,
+  SSR: (level) => 2.4 + 0.32 * level + 0.022 * level * level,
+  UR: (level) => 3.55 + 0.4 * level + 0.025 * level * level
+};
+
+/** Normalized power of a rarity at an enhancement level. Strictly increasing in `level`. */
+export function enhancePower(rarity: Rarity, level: number): number {
+  return POWER_CURVE[rarity](clampEnhance(level));
+}
 
 export function clampEnhance(level: number): number {
   if (!Number.isInteger(level) || level < 0) return 0;
@@ -21,17 +39,20 @@ export function canEnhance(quantity: number, level: number): boolean {
 
 export function applyEnhance<T extends { maxHp: number; atk: number; def: number; crit: number }>(
   stats: T,
-  level: number
+  level: number,
+  rarity: Rarity = 'N'
 ): T {
   const current = clampEnhance(level);
   if (current === 0) return stats;
-  const mul = 1 + current * ENHANCE_PER_LEVEL;
+  // Ratio to the rarity's level-0 band, so an enhanced card keeps its own stat shape.
+  const mul = POWER_CURVE[rarity](current) / POWER_CURVE[rarity](0);
   return {
     ...stats,
     maxHp: Math.max(1, Math.round(stats.maxHp * mul)),
     atk: Math.max(1, Math.round(stats.atk * mul)),
     def: Math.max(1, Math.round(stats.def * mul)),
-    crit: stats.crit + Math.floor(current / 2)
+    // Crit grows slowly and stays inside a sane 5..40 percent band.
+    crit: Math.min(40, stats.crit + Math.floor(current / 3))
   };
 }
 

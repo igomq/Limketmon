@@ -118,12 +118,18 @@ function makeCombatant(side: Side, slot: number, seed: CombatantSeed): Combatant
     energy: ENERGY_START,
     cooldown: 0,
     ability: { ...seed.ability },
+    // Only the unlocked additions; the base ability is never duplicated into this list.
+    skills: (seed.skills ?? []).map((skill) => ({ ...skill })),
     statuses: []
   };
 }
 
 export function cloneState(state: BattleState): BattleState {
-  return structuredClone(state);
+  // The past log is append-only and its event objects are never mutated inside the engine, so the
+  // clone can shallow-copy the array and avoid re-cloning every historical event each turn.
+  const cloned = structuredClone({ ...state, log: [] as BattleEvent[] });
+  cloned.log = [...state.log];
+  return cloned;
 }
 
 export function livingOf(state: BattleState, side: Side): Combatant[] {
@@ -154,6 +160,9 @@ export function advance(state: BattleState, decision: Decision): AdvanceResult {
   const activeUid = state.activeUid;
   if (!activeUid || decision.uid !== activeUid) return { state, events: [], error: 'uid' };
   if (decision.action !== 'attack' && decision.action !== 'skill') return { state, events: [], error: 'action' };
+  // A skill id only means something with a 'skill' action; a bare attack carrying one is rejected
+  // outright rather than silently ignored, so a tampered log can never be replayed as valid.
+  if (decision.action === 'attack' && decision.skillId !== undefined) return { state, events: [], error: 'action' };
 
   const next = cloneState(state);
   const actor = findCombatant(next, activeUid);
@@ -163,14 +172,17 @@ export function advance(state: BattleState, decision: Decision): AdvanceResult {
   let action: 'attack' | 'skill' = decision.action;
   let ability: Ability | null = null;
   if (action === 'skill') {
+    // Cooldown and energy are one shared pool per combatant, whatever skill is chosen.
     if (actor.cooldown > 0) return { state, events: [], error: 'cooldown' };
-    if (!isAbility(actor.ability)) {
+    const chosen = decideAbility(actor, decision.skillId);
+    if (chosen === 'forged') return { state, events: [], error: 'skill' };
+    if (!chosen) {
       events.push({ t: 'warn', message: `malformed ability on ${actor.uid}; basic attack used instead` });
       action = 'attack';
-    } else if (actor.energy < actor.ability.cost) {
+    } else if (actor.energy < chosen.cost) {
       return { state, events: [], error: 'energy' };
     } else {
-      ability = actor.ability;
+      ability = chosen;
     }
   }
 
@@ -198,6 +210,19 @@ export function advance(state: BattleState, decision: Decision): AdvanceResult {
     runOps(next, actor, ability.ops, events, 0);
   }
   return finishAfterTurn(next, actor, events);
+}
+
+/**
+ * Maps a decision to the ability it fires. `undefined` id = the base signature; a known id = the
+ * matching unlocked skill; `'forged'` = an id the combatant does not own (or a malformed value),
+ * which the caller rejects before touching any state.
+ */
+function decideAbility(actor: Combatant, skillId: string | undefined): Ability | null | 'forged' {
+  if (skillId === undefined) return isAbility(actor.ability) ? actor.ability : null;
+  if (typeof skillId !== 'string' || skillId.length === 0 || skillId.length > 64) return 'forged';
+  const match = (actor.skills ?? []).find((skill) => skill.id === skillId);
+  if (!match) return 'forged';
+  return isAbility(match) ? match : null;
 }
 
 /** End of turn: decay statuses and cooldown, drop the actor from the queue, move on. */

@@ -2,18 +2,18 @@ import 'server-only';
 import { getDatabase } from '../db/index';
 import manifest from './data/cards.curated.json';
 import type { Card } from './cards';
-import { isHardPity, kstDate, nextPityCounter, RARITY_ORDER, rollRarityWithPity, untilHardPity, type Rarity } from './rules';
-import { savePull } from './pull';
+import { isHardPity, kstDate, nextPityCounter, RARITY_ORDER, rollGuaranteedRarity, rollRarityWithPity, untilHardPity, type Rarity } from './rules';
+import { InsufficientTickets, savePull, type TicketType } from './pull';
 import { DECK_SIZE, MAX_DECKS, normalizeDeckName, validateDeck } from './decks';
-import { dailyChallenge, type DailyChallenge } from './daily';
+import { dailyChallenge, dailyClaimKey, type DailyChallenge } from './daily';
 import { ACHIEVEMENTS, achievementById, achievementClaimKey, evaluateAchievements, type AchievementProgress } from './achievements';
-import { planBattleRewards, pveFirstClearClaimKey } from './rewards';
+import { planBattleRewards, pveFirstClearClaimKey, rollTicketDrop, ticketDropClaimKey } from './rewards';
 import { summarizeBattles, type BattleRow } from './stats';
 import { CATALOG, buildSetup, CARD_BY_ID } from './battle/setup';
 import { battleStats } from './battle/stats';
 import { applyEnhance, clampEnhance, enhanceCost, MAX_ENHANCE, parseDeckSlots } from './enhance';
-import { BATTLE_RULESET_VERSION, type BattleEvent, type BattleModifier, type BattleState, type Decision } from './battle/types';
-import { OPPONENTS, opponentById } from './battle/opponents';
+import { BATTLE_MODES, BATTLE_RULESET_VERSION, type BattleEvent, type BattleMode, type BattleModifier, type BattleState, type Decision } from './battle/types';
+import { MODE_LABELS, OPPONENTS, opponentById } from './battle/opponents';
 import { aiDecision } from './battle/ai';
 import { runBattle } from './battle/simulate';
 import type { BattleResultSummary, BattleSetupResponse, BattleSummaryRow, DailyChallengeSummary, DeckSummary, RewardLine, StatsSummary } from './battle/api';
@@ -27,6 +27,12 @@ export interface Snapshot {
   inventory: Array<{ cardId: string; quantity: number; firstObtainedAt: string; enhanceLevel: number }>;
   /** Pulls remaining before the hard pity guarantee. */
   pityRemaining: number;
+  /** Guaranteed-pull ticket balances. Kept apart from the normal credit pool. */
+  tickets: { sr: number; ssr: number };
+  /** Battle modes the account has unlocked. 'normal' is always present. */
+  unlockedModes: BattleMode[];
+  /** Opponent ids first-cleared per mode; the UI shows progress and completion from this. */
+  clearedByMode: Record<BattleMode, string[]>;
   decks: DeckSummary[];
   daily: DailyChallengeSummary;
   stats: StatsSummary;
@@ -71,6 +77,9 @@ export function emptySnapshot(now = new Date()): Snapshot {
     completion: 0,
     inventory: [],
     pityRemaining: untilHardPity(0),
+    tickets: { sr: 0, ssr: 0 },
+    unlockedModes: ['normal'],
+    clearedByMode: { normal: [], hard: [], chaos: [] },
     decks: [],
     daily: dailySummary(date, new Set()),
     recentBattles: [],
@@ -116,10 +125,11 @@ export async function ensureUser(userId: string, email: string): Promise<void> {
       INSERT INTO users (id, email, created_at, updated_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET email = excluded.email, updated_at = excluded.updated_at
+      WHERE users.email != excluded.email
     `).bind(userId, email, now, now),
     db.prepare(`
-      INSERT INTO user_game_state (user_id, pull_credits, last_free_pull_date)
-      VALUES (?, 0, NULL)
+      INSERT INTO user_game_state (user_id, pull_credits, last_free_pull_date, sr_tickets, ssr_tickets)
+      VALUES (?, 0, NULL, 0, 0)
       ON CONFLICT(user_id) DO NOTHING
     `).bind(userId)
   ]);
@@ -127,8 +137,12 @@ export async function ensureUser(userId: string, email: string): Promise<void> {
 
 export async function getSnapshot(userId: string, now = new Date()): Promise<Snapshot> {
   const db = getDatabase();
+  const date = kstDate(now);
+  // Progress only ever depends on a bounded set of claim keys. Reading the whole reward_claims
+  // table grew with every settled battle (settle:<id> and ticket_drop:<id> rows).
+  const claimKeys = progressClaimKeys(date);
   const [stateResult, inventoryResult, deckResult, claimResult, battleResult, achievementResult, pullResult] = await db.batch([
-    db.prepare('SELECT pull_credits, last_free_pull_date, pity_counter FROM user_game_state WHERE user_id = ?').bind(userId),
+    db.prepare('SELECT pull_credits, last_free_pull_date, pity_counter, sr_tickets, ssr_tickets FROM user_game_state WHERE user_id = ?').bind(userId),
     db.prepare(`
       SELECT card_id, quantity, first_obtained_at, enhance_level
       FROM inventory WHERE user_id = ? ORDER BY card_id
@@ -138,7 +152,7 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
       FROM decks d LEFT JOIN deck_cards c ON c.deck_id = d.id
       WHERE d.user_id = ? ORDER BY d.created_at ASC, c.slot ASC
     `).bind(userId),
-    db.prepare('SELECT claim_key FROM reward_claims WHERE user_id = ?').bind(userId),
+    db.prepare(`SELECT claim_key FROM reward_claims WHERE user_id = ? AND claim_key IN (${claimKeys.map(() => '?').join(', ')})`).bind(userId, ...claimKeys),
     db.prepare(`
       SELECT id, result, kind, opponent_id, kst_date, created_at, deck_cards, mvp_card_id, damage_dealt
       FROM battles WHERE user_id = ? AND result != 'pending'
@@ -148,7 +162,7 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     db.prepare('SELECT rarity, COUNT(*) AS total FROM pull_history WHERE user_id = ? GROUP BY rarity').bind(userId)
   ]);
   const state = stateResult.results[0] as
-    | { pull_credits: number; last_free_pull_date: string | null; pity_counter: number }
+    | { pull_credits: number; last_free_pull_date: string | null; pity_counter: number; sr_tickets: number; ssr_tickets: number }
     | undefined;
   const inventory = inventoryResult.results as Array<{
     card_id: string;
@@ -201,14 +215,24 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     ownedRarities: [...new Set(inventory.map((row) => rarityById[row.card_id]).filter(Boolean))]
   };
   const satisfied = new Set(evaluateAchievements(progress));
+  const clearedByMode: Record<BattleMode, string[]> = { normal: [], hard: [], chaos: [] };
+  for (const mode of BATTLE_MODES) {
+    clearedByMode[mode] = OPPONENTS.filter((opponent) => claims.has(pveFirstClearClaimKey(opponent.id, mode))).map(
+      (opponent) => opponent.id
+    );
+  }
+  const unlockedModes = unlockedModesFrom(clearedByMode);
 
   return {
     freeAvailable: state?.last_free_pull_date !== kstDate(now),
     credits: state?.pull_credits ?? 0,
     completion: Math.round((owned / cards.length) * 100),
     pityRemaining: untilHardPity(pityCounter),
+    tickets: { sr: Number(state?.sr_tickets ?? 0), ssr: Number(state?.ssr_tickets ?? 0) },
+    unlockedModes,
+    clearedByMode,
     decks: starter ? await listDecks(userId) : decks,
-    daily: dailySummary(kstDate(now), claims),
+    daily: dailySummary(date, claims),
     recentBattles: recentBattles(battleResult.results),
     clearedOpponents: OPPONENTS.filter((opponent) => claims.has(pveFirstClearClaimKey(opponent.id))).map((opponent) => opponent.id),
     opponents: OPPONENTS.map((opponent) => ({
@@ -268,36 +292,46 @@ function safeCards(raw: unknown): string[] {
 }
 
 
-export async function pullCards(userId: string, count: 1 | 5): Promise<{
+export async function pullCards(userId: string, count: 1 | 5 | 10 = 1, ticketType: TicketType = 'normal'): Promise<{
   results: PullResult[];
   snapshot: Snapshot;
 }> {
   const db = getDatabase();
   const now = new Date();
+  const isNormal = ticketType === 'normal';
   // The roll depends on the pity counter, and the pull transaction accepts the draw only if the
   // counter it read is still current. A request that loses that race is refused and retries, so
   // parallel pulls can never each collect the same hard-pity guarantee.
   for (let attempt = 0; ; attempt++) {
-    const state = (await db
-      .prepare('SELECT pity_counter FROM user_game_state WHERE user_id = ?')
-      .bind(userId)
-      .first()) as { pity_counter: number } | null;
-    let counter = Number(state?.pity_counter ?? 0);
+    let counter = 0;
+    if (isNormal) {
+      const state = (await db
+        .prepare('SELECT pity_counter FROM user_game_state WHERE user_id = ?')
+        .bind(userId)
+        .first()) as { pity_counter: number } | null;
+      counter = Number(state?.pity_counter ?? 0);
+    }
     const fromPity = counter;
     const drawn: Card[] = [];
     for (let index = 0; index < count; index++) {
-      const rarity = rollRarityWithPity(randomUnit(), counter);
+      // Guaranteed-ticket pulls never consult the normal pity ladder; they only floor the rarity.
+      const rarity = isNormal
+        ? rollRarityWithPity(randomUnit(), counter)
+        : rollGuaranteedRarity(randomUnit(), ticketType === 'ssr' ? 'SSR' : 'SR');
       drawn.push(pickCard(rarity));
-      counter = nextPityCounter(counter, rarity);
+      if (isNormal) counter = nextPityCounter(counter, rarity);
     }
     try {
-      const results = await savePull(db, userId, drawn, now, fromPity, counter);
+      const results = await savePull(db, userId, drawn, now, fromPity, counter, ticketType);
       return { results, snapshot: await getSnapshot(userId, now) };
     } catch (error) {
+      if (error instanceof InsufficientTickets) {
+        throw new GameError('not_enough_tickets', ticketMessage(ticketType, count));
+      }
       if (error instanceof Error && /chk_user_game_state_credits/.test(error.message)) {
-        throw new GameError('not_enough_credits', count === 5
-          ? '5장 뽑기에는 뽑기권 5장이 필요해요.'
-          : '오늘의 무료 뽑기를 사용했고, 뽑기권이 부족해요.');
+        throw new GameError('not_enough_credits', count === 1
+          ? '오늘의 무료 뽑기를 사용했고, 뽑기권이 부족해요.'
+          : `${count}장 뽑기에는 뽑기권 ${count}장이 필요해요.`);
       }
       // Another pull moved the counter first; redraw against the value it committed.
       if (error instanceof Error && /pity_changed/.test(error.message) && attempt < 12) continue;
@@ -306,12 +340,37 @@ export async function pullCards(userId: string, count: 1 | 5): Promise<{
   }
 }
 
+function ticketMessage(ticketType: TicketType, count: number): string {
+  const label = ticketType === 'ssr' ? 'SSR 이상 뽑기권' : 'SR 이상 뽑기권';
+  return count === 1
+    ? `${label}이 필요해요.`
+    : `${count}장 뽑기에는 ${label} ${count}장이 필요해요.`;
+}
 
-export async function redeemCoupon(userId: string, rawCode: string): Promise<Snapshot> {
+
+interface CouponGrant {
+  credits: number;
+  sr: number;
+  ssr: number;
+}
+
+/** Case-insensitive once-per-user coupons. The 100-p coupons grant 20 guaranteed tickets each. */
+const COUPONS: Record<string, CouponGrant> = {
+  LIMKETMON: { credits: 100, sr: 0, ssr: 0 },
+  LIMKETMON_SR_100P: { credits: 0, sr: 20, ssr: 0 },
+  LIMKETMON_SSR_100P: { credits: 0, sr: 0, ssr: 20 }
+};
+
+export async function redeemCoupon(userId: string, rawCode: string): Promise<{ snapshot: Snapshot; granted: CouponGrant }> {
   const code = rawCode.trim().toUpperCase();
-  if (code !== 'LIMKETMON') throw new GameError('invalid_code', '유효하지 않은 쿠폰 코드입니다.');
+  const grant = COUPONS[code];
+  if (!grant) throw new GameError('invalid_code', '유효하지 않은 쿠폰 코드입니다.');
 
   const db = getDatabase();
+  const before = (await db
+    .prepare('SELECT pull_credits, sr_tickets, ssr_tickets FROM user_game_state WHERE user_id = ?')
+    .bind(userId)
+    .first()) as { pull_credits: number; sr_tickets: number; ssr_tickets: number } | null;
   try {
     await db.batch([
       db.prepare(`
@@ -319,8 +378,12 @@ export async function redeemCoupon(userId: string, rawCode: string): Promise<Sna
         VALUES (?, ?, ?)
       `).bind(userId, code, new Date().toISOString()),
       db.prepare(`
-        UPDATE user_game_state SET pull_credits = pull_credits + 100 WHERE user_id = ?
-      `).bind(userId)
+        UPDATE user_game_state SET
+          pull_credits = pull_credits + ?,
+          sr_tickets = sr_tickets + ?,
+          ssr_tickets = ssr_tickets + ?
+        WHERE user_id = ?
+      `).bind(grant.credits, grant.sr, grant.ssr, userId)
     ]);
   } catch (error) {
     const redeemed = await db.prepare(`
@@ -330,7 +393,19 @@ export async function redeemCoupon(userId: string, rawCode: string): Promise<Sna
     throw error;
   }
 
-  return getSnapshot(userId);
+  const after = (await db
+    .prepare('SELECT pull_credits, sr_tickets, ssr_tickets FROM user_game_state WHERE user_id = ?')
+    .bind(userId)
+    .first()) as { pull_credits: number; sr_tickets: number; ssr_tickets: number } | null;
+  // Report what the row actually gained, never a hardcoded constant.
+  return {
+    snapshot: await getSnapshot(userId),
+    granted: {
+      credits: Number(after?.pull_credits ?? 0) - Number(before?.pull_credits ?? 0),
+      sr: Number(after?.sr_tickets ?? 0) - Number(before?.sr_tickets ?? 0),
+      ssr: Number(after?.ssr_tickets ?? 0) - Number(before?.ssr_tickets ?? 0)
+    }
+  };
 }
 
 export async function enhanceCard(userId: string, rawCardId: unknown): Promise<Snapshot> {
@@ -575,7 +650,7 @@ function compareBattlePower(leftId: string, rightId: string, leftLv = 0, rightLv
   const right = CARD_BY_ID.get(rightId);
   if (!left || !right) return leftId.localeCompare(rightId);
   const power = (card: Card, level: number) => {
-    const stats = applyEnhance(battleStats(card), level);
+    const stats = applyEnhance(battleStats(card), level, card.rarity);
     return stats.maxHp + stats.atk * 2 + stats.def + stats.spd * 2;
   };
   return power(right, rightLv) - power(left, leftLv) || left.version - right.version;
@@ -605,6 +680,7 @@ async function enhanceLevelsFor(userId: string): Promise<Map<string, number>> {
 interface BattleRowFull {
   id: string;
   kind: string;
+  mode: string;
   opponent_id: string;
   kst_date: string;
   deck_id: string | null;
@@ -622,7 +698,7 @@ interface BattleRowFull {
 }
 
 const BATTLE_COLUMNS = `SELECT id, kind, opponent_id, kst_date, deck_id, ruleset_version, seed, deck_cards, modifier,
-  decisions, result, rounds, damage_dealt, clutch, mvp_card_id, summary FROM battles`;
+  decisions, result, rounds, damage_dealt, clutch, mvp_card_id, summary, mode FROM battles`;
 
 /** Pending rows are transient drafts; only this many may exist per account at once. */
 const MAX_PENDING_BATTLES = 40;
@@ -689,12 +765,14 @@ function parseDecisions(raw: string): Decision[] {
 }
 
 function setupFromRow(row: BattleRowFull) {
-  const opponent = opponentById(row.opponent_id);
+  const mode = parseMode(row.mode);
+  const opponent = opponentById(row.opponent_id, mode);
   const slots = parseDeckSlots(row.deck_cards);
   const cardIds = slots.map((slot) => slot.id);
   if (!opponent || cardIds.length !== DECK_SIZE) return null;
   return buildSetup({
     kind: row.kind === 'daily' ? 'daily' : 'pve',
+    mode,
     opponentId: row.opponent_id,
     modifier: parseModifier(row.modifier),
     seed: Number(row.seed),
@@ -704,18 +782,25 @@ function setupFromRow(row: BattleRowFull) {
   });
 }
 
+/** Stored mode strings are untrusted: anything unknown falls back to normal. */
+function parseMode(raw: unknown): BattleMode {
+  return BATTLE_MODES.includes(raw as BattleMode) ? (raw as BattleMode) : 'normal';
+}
+
 /**
  * Starts a battle. The server owns the seed, opponent, rules and deck snapshot, so a client can
  * only ever ask for a legal battle with cards it actually owns.
  */
 export async function startBattle(
   userId: string,
-  input: { deckId?: unknown; opponentId?: unknown; kind?: unknown },
+  input: { deckId?: unknown; opponentId?: unknown; kind?: unknown; mode?: unknown },
   now = new Date()
 ): Promise<BattleSetupResponse> {
   const db = getDatabase();
   if (typeof input.deckId !== 'string') throw new GameError('invalid_deck', '덱을 선택해주세요.');
   const kind = input.kind === 'daily' ? 'daily' : 'pve';
+  // The daily is its own normal-mode challenge; only explicit PvE battles carry a mode.
+  const mode: BattleMode = kind === 'daily' ? 'normal' : parseMode(input.mode);
   const kst = kstDate(now);
 
   const deckRow = (await db
@@ -742,6 +827,10 @@ export async function startBattle(
     }
     opponentId = input.opponentId;
     modifier = { kind: 'none' };
+    // Unlock is enforced server-side; the client's mode selector is only a hint.
+    if (mode !== 'normal' && !(await unlockedModesFor(userId)).includes(mode)) {
+      throw new GameError('mode_locked', `${MODE_LABELS[mode]} 모드는 아직 잠겨 있어요.`);
+    }
   }
 
   const validated = validateDeck(
@@ -755,8 +844,8 @@ export async function startBattle(
   const battleId = crypto.randomUUID();
   const levels = await enhanceLevelsFor(userId);
   const snapshot = validated.cards.map((id) => ({ id, lv: levels.get(id) ?? 0 }));
-  const setup = buildSetup({ kind, opponentId, modifier, seed, playerCardIds: validated.cards, playerEnhance: snapshot.map((slot) => slot.lv), battleId });
-  const opponent = opponentById(opponentId)!;
+  const setup = buildSetup({ kind, mode, opponentId, modifier, seed, playerCardIds: validated.cards, playerEnhance: snapshot.map((slot) => slot.lv), battleId });
+  const opponent = opponentById(opponentId, mode)!;
 
   // Keep the table bounded: an authenticated client could otherwise open battles forever.
   await db.prepare(`
@@ -766,12 +855,13 @@ export async function startBattle(
   `).bind(userId, userId, MAX_PENDING_BATTLES - 1).run();
   await db.prepare(`
     INSERT INTO battles
-      (id, user_id, kind, opponent_id, deck_id, ruleset_version, seed, deck_cards, modifier, decisions, result, kst_date, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'pending', ?, ?)
+      (id, user_id, kind, mode, opponent_id, deck_id, ruleset_version, seed, deck_cards, modifier, decisions, result, kst_date, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', 'pending', ?, ?)
   `).bind(
     battleId,
     userId,
     kind,
+    mode,
     opponentId,
     deckRow.id,
     BATTLE_RULESET_VERSION,
@@ -787,6 +877,7 @@ export async function startBattle(
     ruleset: BATTLE_RULESET_VERSION,
     seed,
     kind,
+    mode,
     opponentId,
     opponentName: opponent.name,
     opponentTitle: opponent.title,
@@ -817,14 +908,23 @@ export async function finishBattle(
   const submitted: Decision[] = [];
   for (const raw of decisions) {
     if (!raw || typeof raw !== 'object') throw new GameError('invalid_decisions', '전투 기록이 올바르지 않습니다.');
-    const entry = raw as { uid?: unknown; action?: unknown };
+    const entry = raw as { uid?: unknown; action?: unknown; skillId?: unknown };
     if (typeof entry.uid !== 'string' || entry.uid.length > 8) {
       throw new GameError('invalid_decisions', '전투 기록이 올바르지 않습니다.');
     }
     if (entry.action !== 'attack' && entry.action !== 'skill') {
       throw new GameError('invalid_decisions', '전투 기록이 올바르지 않습니다.');
     }
-    submitted.push({ uid: entry.uid, action: entry.action });
+    // An explicit skill id must be a short, non-empty string; whether the combatant actually owns
+    // it is decided by the engine during re-simulation, which refuses an unlawful battle.
+    if (entry.skillId === undefined) {
+      submitted.push({ uid: entry.uid, action: entry.action });
+      continue;
+    }
+    if (typeof entry.skillId !== 'string' || entry.skillId.length === 0 || entry.skillId.length > 64) {
+      throw new GameError('invalid_decisions', '전투 기록이 올바르지 않습니다.');
+    }
+    submitted.push({ uid: entry.uid, action: entry.action, skillId: entry.skillId });
   }
 
   const row = (await db
@@ -832,8 +932,11 @@ export async function finishBattle(
     .bind(battleId, userId)
     .first()) as BattleRowFull | null;
   if (!row) throw new GameError('not_found', '전투를 찾을 수 없습니다.');
-  // Repeat calls are answered from the settled row: one battle can only ever pay out once.
-  if (row.result !== 'pending') return cachedSummary(row);
+  // Repeat calls are answered from the settled row, but always re-derived from the reward_claims
+  // rows this battle actually inserted. The stored summary can still be the provisional one written
+  // inside the settlement batch (empty rewards) if the request died before the post-commit summary
+  // write, and a retry must never report less than was really paid.
+  if (row.result !== 'pending') return buildAuthoritativeSummary(db, userId, battleId, row);
   if (Number(row.ruleset_version) !== BATTLE_RULESET_VERSION) {
     const summary = invalidSummary(row);
     await db
@@ -843,8 +946,9 @@ export async function finishBattle(
     return summary;
   }
 
+  const mode = parseMode(row.mode);
   const setup = setupFromRow(row);
-  const opponent = opponentById(row.opponent_id);
+  const opponent = opponentById(row.opponent_id, mode);
   if (!setup || !opponent) throw new GameError('invalid_battle', '전투를 재현할 수 없습니다.');
 
   const simulation = runBattle(setup, submitted, (state) => aiDecision(state, opponent.profile));
@@ -873,17 +977,25 @@ export async function finishBattle(
   // The reward belongs to the day the challenge was issued, not to the day it was settled:
   // using "now" would let a player bank an easy day's battle and cash it in later.
   const kst = row.kst_date;
-  const claims = await weeklyClaims(userId);
+  // Bounded to the keys this settlement can read: first clears for this opponent/mode, the daily
+  // key for the battle's own KST date, and the achievement keys.
+  const claims = await progressClaims(userId, kst);
   const plan = planBattleRewards(
     {
       kind: row.kind === 'daily' ? 'daily' : 'pve',
       opponentId: row.opponent_id,
+      mode,
       result,
       kstDate: kst,
-      firstClear: !claims.has(pveFirstClearClaimKey(row.opponent_id))
+      firstClear: !claims.has(pveFirstClearClaimKey(row.opponent_id, mode))
     },
     opponent.reward.credits
   );
+  // Cryptographic server draw on settlement: never predictable before battle starts.
+  // In daily mode, tickets only drop if the daily claim hasn't been claimed yet.
+  const dailyAlreadyPaid = row.kind === 'daily' && claims.has(dailyClaimKey(kst));
+  const dropType = result === 'won' && !dailyAlreadyPaid ? rollTicketDrop(mode, randomUnit()) : null;
+  const ticketQuantity = dropType ? 1 : 0;
   const progress = await achievementProgress(userId, {
     won: result === 'won',
     opponentId: row.opponent_id,
@@ -895,15 +1007,7 @@ export async function finishBattle(
   const claimedAt = now.toISOString();
   const summary: BattleResultSummary = {
     result,
-    // Only lines this settlement can actually pay: anything already claimed pays nothing, and a
-    // summary must never advertise a reward the player did not receive.
-    rewards: [
-      ...plan.lines.filter((_line, index) => !claims.has(plan.claims[index]!)),
-      ...unlocked.map((id) => ({
-        label: `업적 · ${achievementById(id)?.name ?? id}`,
-        credits: achievementById(id)?.reward ?? 0
-      }))
-    ],
+    rewards: [],
     unlocked,
     mvpCardId: mvpCardId(simulation.state),
     rounds: simulation.state.round,
@@ -921,10 +1025,11 @@ export async function finishBattle(
           n_only = ?, decisions = ?, summary = ?, completed_at = ?
         WHERE id = ? AND user_id = ? AND result = 'pending'`)
         .bind(result, simulation.state.round, damage, clutch ? 1 : 0, summary.mvpCardId, nOnly, JSON.stringify(verified), JSON.stringify(summary), claimedAt, battleId, userId),
-      ...plan.claims.map((key) =>
-        db.prepare('INSERT OR IGNORE INTO reward_claims (user_id, claim_key, credits, battle_id, claimed_at) VALUES (?, ?, ?, ?, ?)')
-          .bind(userId, key, plan.credits, battleId, claimedAt)
-      ),
+      ...plan.claims.map((key) => {
+        const isDaily = row.kind === 'daily';
+        return db.prepare('INSERT OR IGNORE INTO reward_claims (user_id, claim_key, credits, ticket_type, ticket_quantity, battle_id, claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .bind(userId, key, plan.credits, isDaily ? dropType : null, isDaily ? ticketQuantity : 0, battleId, claimedAt);
+      }),
       ...unlocked.map((id) =>
         db.prepare('INSERT OR IGNORE INTO user_achievements (user_id, achievement_id, unlocked_at) VALUES (?, ?, ?)')
           .bind(userId, id, claimedAt)
@@ -933,31 +1038,140 @@ export async function finishBattle(
         db.prepare('INSERT OR IGNORE INTO reward_claims (user_id, claim_key, credits, battle_id, claimed_at) VALUES (?, ?, ?, ?, ?)')
           .bind(userId, achievementClaimKey(id), achievementById(id)?.reward ?? 0, battleId, claimedAt)
       ),
+      // For non-daily wins, ticket drop has its own claim key tied to this battle.
+      ...(dropType && row.kind !== 'daily'
+        ? [
+            db.prepare('INSERT INTO reward_claims (user_id, claim_key, credits, ticket_type, ticket_quantity, battle_id, claimed_at) VALUES (?, ?, 0, ?, ?, ?, ?)')
+              .bind(userId, ticketDropClaimKey(battleId), dropType, ticketQuantity, battleId, claimedAt)
+          ]
+        : []),
       // Credits come from the claims that actually landed in this transaction, so a concurrent
       // finish of the same battle cannot pay twice. claimed_at is this request's nonce.
       db.prepare(`UPDATE user_game_state SET pull_credits = pull_credits + (
           SELECT COALESCE(SUM(credits), 0) FROM reward_claims
           WHERE user_id = ? AND battle_id = ? AND claimed_at = ?
+        ),
+        sr_tickets = sr_tickets + (
+          SELECT COALESCE(SUM(CASE WHEN ticket_type = 'sr' THEN ticket_quantity ELSE 0 END), 0) FROM reward_claims
+          WHERE user_id = ? AND battle_id = ? AND claimed_at = ?
+        ),
+        ssr_tickets = ssr_tickets + (
+          SELECT COALESCE(SUM(CASE WHEN ticket_type = 'ssr' THEN ticket_quantity ELSE 0 END), 0) FROM reward_claims
+          WHERE user_id = ? AND battle_id = ? AND claimed_at = ?
         ) WHERE user_id = ?`)
-        .bind(userId, battleId, claimedAt, userId)
+        .bind(userId, battleId, claimedAt, userId, battleId, claimedAt, userId, battleId, claimedAt, userId)
     ]);
   } catch (error) {
     const settled = (await db
       .prepare(`${BATTLE_COLUMNS} WHERE id = ? AND user_id = ?`)
       .bind(battleId, userId)
       .first()) as BattleRowFull | null;
-    // Another request settled this battle first (its claims rolled us back). Report what was
-    // actually paid, read from the claim rows themselves rather than from a cached summary.
-    if (settled && settled.result !== 'pending') return cachedSummary(settled);
+    // Another request settled this battle first (its claims rolled us back).
+    if (settled && settled.result !== 'pending') {
+      return buildAuthoritativeSummary(db, userId, battleId, settled);
+    }
     throw error;
   }
-  return summary;
+  return buildAuthoritativeSummary(db, userId, battleId, row, summary, verified);
 }
 
-async function weeklyClaims(userId: string): Promise<Set<string>> {
+async function buildAuthoritativeSummary(
+  db: D1Database,
+  userId: string,
+  battleId: string,
+  row: BattleRowFull,
+  baseSummary?: BattleResultSummary,
+  verifiedDecisions?: Decision[]
+): Promise<BattleResultSummary> {
+  // Read back actual inserted claims for this battle to build authoritative paid summary.
+  const actualClaimsResult = await db.prepare(
+    'SELECT claim_key, credits, ticket_type, ticket_quantity FROM reward_claims WHERE user_id = ? AND battle_id = ? AND claim_key != ?'
+  ).bind(userId, battleId, `settle:${battleId}`).all();
+  const actualClaims = actualClaimsResult.results as Array<{ claim_key: string; credits: number; ticket_type: string | null; ticket_quantity: number }>;
+  const actualRewards: RewardLine[] = [];
+  for (const c of actualClaims) {
+    if (c.credits > 0) {
+      let label = '격파 보상';
+      if (c.claim_key.startsWith('pve_first:')) label = '첫 격파 보상';
+      else if (c.claim_key.startsWith('daily:')) label = '데일리 챌린지 보상';
+      else if (c.claim_key.startsWith('achievement:')) {
+        const achId = c.claim_key.replace('achievement:', '');
+        label = `업적 · ${achievementById(achId)?.name ?? achId}`;
+      }
+      actualRewards.push({ label, credits: c.credits });
+    }
+    if (c.ticket_type && c.ticket_quantity > 0) {
+      actualRewards.push({
+        label: c.ticket_type === 'ssr' ? 'SSR 이상 뽑기권' : 'SR 이상 뽑기권',
+        credits: 0,
+        ticketType: c.ticket_type as 'sr' | 'ssr',
+        quantity: c.ticket_quantity
+      });
+    }
+  }
+  const prevSummary = row.summary ? cachedSummary(row) : null;
+  // Achievements come from the claim rows this battle actually inserted. A stored summary could
+  // advertise an unlock whose user_achievements write lost a concurrent distinct-battle race.
+  const unlocked = actualClaims
+    .filter((claim) => claim.claim_key.startsWith('achievement:'))
+    .map((claim) => claim.claim_key.slice('achievement:'.length));
+  const finalSummary: BattleResultSummary = {
+    result: baseSummary?.result ?? prevSummary?.result ?? (row.result === 'pending' ? 'invalid' : row.result as BattleResultSummary['result']),
+    mvpCardId: baseSummary?.mvpCardId ?? prevSummary?.mvpCardId ?? row.mvp_card_id,
+    rounds: baseSummary?.rounds ?? prevSummary?.rounds ?? Number(row.rounds ?? 0),
+    damageDealt: baseSummary?.damageDealt ?? prevSummary?.damageDealt ?? Number(row.damage_dealt ?? 0),
+    unlocked,
+    rewards: actualRewards
+  };
+  // Persist the actual paid summary in the battle row so future cached reads match the real receipt.
+  await db.prepare('UPDATE battles SET summary = ? WHERE id = ? AND user_id = ?')
+    .bind(JSON.stringify(finalSummary), battleId, userId).run();
+  return finalSummary;
+}
+
+/**
+ * Every reward_claims key a progress read can depend on: the 15 first-clear keys (5 opponents x 3
+ * modes), the 8 achievement keys and the single daily key for `date`. Bounded at 24 keys, so the
+ * read stays flat no matter how many battles have been settled (each one also writes its own
+ * settle:<id> and ticket_drop:<id> rows, which no progress query needs). The lookup uses the
+ * (user_id, claim_key) primary key.
+ */
+function progressClaimKeys(date: string): string[] {
+  const keys: string[] = [];
+  for (const mode of BATTLE_MODES) for (const opponent of OPPONENTS) keys.push(pveFirstClearClaimKey(opponent.id, mode));
+  for (const achievement of ACHIEVEMENTS) keys.push(achievementClaimKey(achievement.id));
+  keys.push(dailyClaimKey(date));
+  return keys;
+}
+
+/** Bounded replacement for a full reward_claims scan; see progressClaimKeys. */
+async function progressClaims(userId: string, date: string): Promise<Set<string>> {
   const db = getDatabase();
-  const result = await db.prepare('SELECT claim_key FROM reward_claims WHERE user_id = ?').bind(userId).all();
+  const keys = progressClaimKeys(date);
+  const result = await db
+    .prepare(`SELECT claim_key FROM reward_claims WHERE user_id = ? AND claim_key IN (${keys.map(() => '?').join(', ')})`)
+    .bind(userId, ...keys)
+    .all();
   return new Set((result.results as Array<{ claim_key: string }>).map((row) => row.claim_key));
+}
+
+/** All five normal firsts unlock hard; all five hard firsts unlock chaos. Normal is always open. */
+function unlockedModesFrom(clearedByMode: Record<BattleMode, string[]>): BattleMode[] {
+  const modes: BattleMode[] = ['normal'];
+  if (clearedByMode.normal.length === OPPONENTS.length) modes.push('hard');
+  if (clearedByMode.hard.length === OPPONENTS.length) modes.push('chaos');
+  return modes;
+}
+
+async function unlockedModesFor(userId: string): Promise<BattleMode[]> {
+  const claims = await progressClaims(userId, kstDate(new Date()));
+  const clearedByMode: Record<BattleMode, string[]> = { normal: [], hard: [], chaos: [] };
+  for (const mode of BATTLE_MODES) {
+    clearedByMode[mode] = OPPONENTS.filter((opponent) => claims.has(pveFirstClearClaimKey(opponent.id, mode))).map(
+      (opponent) => opponent.id
+    );
+  }
+  return unlockedModesFrom(clearedByMode);
 }
 
 /** Cumulative achievement counters, including the battle that is finishing right now. */
@@ -1037,7 +1251,8 @@ export async function replayBattle(userId: string, battleId: string) {
     .first()) as BattleRowFull | null;
   if (!row) throw new GameError('not_found', '전투를 찾을 수 없습니다.');
   const setup = setupFromRow(row);
-  const opponent = opponentById(row.opponent_id);
+  const mode = parseMode(row.mode);
+  const opponent = opponentById(row.opponent_id, mode);
   if (!setup || !opponent) throw new GameError('invalid_battle', '전투를 재현할 수 없습니다.');
   const decisions = parseDecisions(row.decisions);
   const simulation = runBattle(setup, decisions, (state) => aiDecision(state, opponent.profile));
@@ -1046,6 +1261,7 @@ export async function replayBattle(userId: string, battleId: string) {
     rulesetVersion: Number(row.ruleset_version),
     seed: Number(row.seed),
     kind: row.kind,
+    mode,
     opponentId: row.opponent_id,
     opponentName: opponent.name,
     result: row.result,

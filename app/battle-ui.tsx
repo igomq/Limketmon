@@ -3,13 +3,13 @@
 import { motion, useReducedMotion } from 'motion/react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Card } from '../lib/cards';
-import type { AiProfile, BattleEvent, BattleKind, BattleModifier, BattleSetup, BattleState, Combatant, Decision } from '../lib/battle/types';
+import type { Ability, AiProfile, BattleEvent, BattleKind, BattleMode, BattleModifier, BattleSetup, BattleState, Combatant, Decision } from '../lib/battle/types';
 import { ELEMENT_LABEL, STATUS_LABEL } from '../lib/battle/types';
 import type { BattleResultSummary, BattleSetupResponse, DailyChallengeSummary, DeckSummary } from '../lib/battle/api';
-import { OPPONENTS } from '../lib/battle/opponents';
-import { runBattle } from '../lib/battle/simulate';
+import { BATTLE_MODES, MODE_CREDITS_MULTIPLIER, MODE_LABELS, OPPONENTS, opponentById } from '../lib/battle/opponents';
+import { runBattle, stepBattle } from '../lib/battle/simulate';
 import { aiDecision, deciderFor } from '../lib/battle/ai';
-import { CardArtwork, Icon, spring } from './card-ui';
+import { CardArtwork, Icon, describeOps, spring } from './card-ui';
 import './battle.css';
 
 type User = { email: string; displayName: string } | null;
@@ -19,6 +19,11 @@ type BattleViewProps = {
   decks: DeckSummary[];
   cards: Card[];
   daily: DailyChallengeSummary | null;
+  /** Modes the server has unlocked for this user; locked chips show the requirement. */
+  unlockedModes: BattleMode[];
+  /** Opponent ids already cleared, per mode; drives the completion ticks and progress. */
+  clearedByMode: Record<BattleMode, string[]>;
+  inventory?: Array<{ cardId: string; enhanceLevel?: number }>;
   onStateChange: () => void;
   onNavigate: (tab: string) => void;
   onOpenCard: (card: Card) => void;
@@ -32,8 +37,10 @@ type LogEntry = { key: number; event: BattleEvent };
 const signInHref = `/signin-with-chatgpt?return_to=${encodeURIComponent('/#battle')}`;
 const LOG_LIMIT = 80;
 const DECK_SIZE = 3;
-const DIFFICULTY_LABEL: Record<string, string> = { beginner: '입문', normal: '보통', hard: '고급', boss: '보스' };
+const DIFFICULTY_LABEL: Record<string, string> = { beginner: '입문', normal: '보통', hard: '하드', boss: '보스' };
 const RESULT_LABEL: Record<BattleState['status'], string> = { active: '진행 중', won: '승리', lost: '패배', draw: '무승부' };
+/** Shown on a locked mode chip; the requirement mirrors the server unlock rule. */
+const MODE_UNLOCK_HINT: Record<BattleMode, string> = { normal: '기본 해제', hard: '일반 5명 격파 시', chaos: '하드 5명 격파 시' };
 /** Mirrors lib/achievements.ts ids; the summary only carries ids. */
 const ACHIEVEMENT_LABEL: Record<string, string> = {
   first_win: '첫 승리',
@@ -46,6 +53,24 @@ const ACHIEVEMENT_LABEL: Record<string, string> = {
   daily_3: '데일리 3회 클리어'
 };
 const DEFAULT_PROFILE: AiProfile = { healBelow: 0.7, lethalFirst: false, skillMinTargets: 0, skillAppetite: 0.5 };
+
+/**
+ * Event playback pace. Purely a presentation preference, never a battle rule: the server still owns
+ * the seed and re-simulates every submitted decision. 'instant' drains the pending queue in one
+ * batch (and is forced whenever the OS asks for reduced motion).
+ */
+type BattlePace = 'normal' | 'x2' | 'instant';
+const PACE_OPTIONS: Array<{ value: BattlePace; label: string }> = [
+  { value: 'normal', label: '기본' },
+  { value: 'x2', label: '2배속' },
+  { value: 'instant', label: '즉시 진행' }
+];
+const PACE_SCALE: Record<BattlePace, number> = { normal: 1, x2: 0.5, instant: 0 };
+
+/** The AI profile the server re-simulates with: the same mode-aware lib lookup, never a local guess. */
+function profileFor(opponentId: string, mode: BattleMode): AiProfile {
+  return opponentById(opponentId, mode)?.profile ?? DEFAULT_PROFILE;
+}
 
 function stepDelay(event: BattleEvent, reduced: boolean): number {
   if (reduced) return event.t === 'end' ? 600 : 320;
@@ -127,13 +152,14 @@ export function opponentDecision(state: BattleState, profile: AiProfile): Decisi
   return aiDecision(state, profile);
 }
 
-const UnitTile = memo(function UnitTile({ c, card, fx, active, reduced }: {
+const UnitTile = memo(function UnitTile({ c, card, fx, active, reduced, enhanceLevel = 0 }: {
   c: Combatant;
   sig: string;
   card: Card | undefined;
   fx: Fx | null;
   active: boolean;
   reduced: boolean;
+  enhanceLevel?: number;
 }) {
   const ratio = c.maxHp > 0 ? Math.max(0, c.hp) / c.maxHp : 0;
   const health = c.hp <= 0 ? 'down' : ratio <= 0.3 ? 'low' : ratio <= 0.6 ? 'mid' : 'high';
@@ -147,7 +173,7 @@ const UnitTile = memo(function UnitTile({ c, card, fx, active, reduced }: {
         {active && <span className="unit-turn">차례</span>}
       </div>
       <div className="unit-art">
-        {card ? <CardArtwork card={card} /> : <div className="unit-fallback">{c.name}</div>}
+        {card ? <CardArtwork card={card} enhanceLevel={enhanceLevel} /> : <div className="unit-fallback">{c.name}</div>}
       </div>
       <p className="unit-name">{c.name}</p>
       <div className="hp-bar" data-state={health} role="progressbar" aria-label={`${c.name} 체력`} aria-valuenow={c.hp} aria-valuemin={0} aria-valuemax={c.maxHp}>
@@ -175,13 +201,15 @@ const UnitTile = memo(function UnitTile({ c, card, fx, active, reduced }: {
       {fx && <span key={`flash-${fx.key}`} className={`fx-flash fx-${fx.tone}`} aria-hidden="true" />}
     </article>
   );
-}, (before, after) => before.sig === after.sig && before.card === after.card && before.active === after.active && before.fx?.key === after.fx?.key && before.reduced === after.reduced);
+}, (before, after) => before.sig === after.sig && before.card === after.card && before.active === after.active && before.fx?.key === after.fx?.key && before.reduced === after.reduced && before.enhanceLevel === after.enhanceLevel);
 
-export function BattleView({ user, decks, cards, daily, onStateChange, onNavigate, onOpenCard, onError }: BattleViewProps) {
+export function BattleView({ user, decks, cards, daily, unlockedModes, clearedByMode, inventory, onStateChange, onNavigate, onOpenCard, onError }: BattleViewProps) {
   const reduced = !!useReducedMotion();
   const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
+  const enhanceMap = useMemo(() => new Map(inventory?.map((item) => [item.cardId, item.enhanceLevel ?? 0]) ?? []), [inventory]);
   const [phase, setPhase] = useState<'select' | 'battle'>('select');
   const [deckId, setDeckId] = useState('');
+  const [mode, setMode] = useState<BattleMode>('normal');
   const [starting, setStarting] = useState(false);
   const [setup, setSetup] = useState<BattleSetupResponse | null>(null);
   const [battleId, setBattleId] = useState<string | null>(null);
@@ -193,21 +221,43 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
   const [summary, setSummary] = useState<BattleResultSummary | null>(null);
   const [settling, setSettling] = useState(false);
   const [settleFailed, setSettleFailed] = useState(false);
+  /** Component-local only: no storage, no server round-trip, no effect on the verified battle. */
+  const [pace, setPace] = useState<BattlePace>('x2');
+  /** Reduced-motion users always get the instant drain, whatever the select says. */
+  const activePace: BattlePace = reduced ? 'instant' : pace;
   const decisions = useRef<Decision[]>([]);
   const consumed = useRef(0);
   const seq = useRef(0);
   const settled = useRef(false);
   /** Bumped on every settle and on every reset, so a stale response can never land on a new battle. */
   const settleRun = useRef(0);
+  /** Same idea for start: leaving the screen mid-request must not drop a battle onto the new view. */
+  const startRun = useRef(0);
   const logRef = useRef<HTMLOListElement>(null);
+
+  // Unmounting (tab change) invalidates any in-flight settle/start so its response is ignored.
+  useEffect(() => () => { settleRun.current += 1; startRun.current += 1; }, []);
 
   useEffect(() => {
     if (decks.some((deck) => deck.id === deckId)) return;
     setDeckId((decks.find((deck) => deck.isDefault) ?? decks[0])?.id ?? '');
   }, [decks, deckId]);
 
+  // A snapshot that arrives mid-selection must never leave a locked or unknown mode chosen.
+  useEffect(() => {
+    if (!unlockedModes.includes(mode)) setMode('normal');
+  }, [unlockedModes, mode]);
+
   useEffect(() => {
     if (!queue.length) return;
+    // Instant mode: flush every pending event in one commit. Switching the select mid-animation
+    // re-runs this effect, whose cleanup clears the outstanding timer, so no event is lost or doubled.
+    if (activePace === 'instant') {
+      setLog((entries) => [...entries, ...queue.map((event) => ({ key: (seq.current += 1), event }))].slice(-LOG_LIMIT));
+      setQueue([]);
+      setFx([]);
+      return;
+    }
     const head = queue[0]!;
     const key = seq.current + 1;
     seq.current = key;
@@ -216,9 +266,9 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
       setQueue((rest) => rest.slice(1));
       const effect = effectFor(head);
       if (effect) setFx((list) => [{ key, ...effect }, ...list].slice(0, 4));
-    }, stepDelay(head, reduced));
+    }, stepDelay(head, reduced) * PACE_SCALE[activePace]);
     return () => clearTimeout(timer);
-  }, [queue, reduced]);
+  }, [queue, reduced, activePace]);
 
   useEffect(() => {
     const element = logRef.current;
@@ -269,15 +319,16 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
     [chosen, byId]
   );
 
-  async function start(opponentId: string, kind: BattleKind) {
+  async function start(opponentId: string, kind: BattleKind, battleMode: BattleMode) {
     if (starting || !chosenLegal) return;
+    const run = ++startRun.current;
     setStarting(true);
     setNotice(null);
     try {
       const response = await fetch('/api/battle', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'start', opponentId, deckId, kind })
+        body: JSON.stringify({ action: 'start', opponentId, deckId, kind, mode: battleMode })
       });
       const body = await response.json() as { setup?: Partial<BattleSetupResponse>; error?: string };
       const data = body.setup;
@@ -285,9 +336,10 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
         throw new Error(body.error || '전투를 시작하지 못했어요. 잠시 후 다시 시도해주세요.');
       }
       const loaded = data as BattleSetupResponse;
-      const profile = OPPONENTS.find((opponent) => opponent.id === loaded.opponentId)?.profile ?? DEFAULT_PROFILE;
+      const profile = profileFor(loaded.opponentId, loaded.mode ?? battleMode);
       const opening = runBattle(loaded as BattleSetup, [], createOpponentDecider(profile));
       if (opening.error && opening.error !== 'unfinished') throw new Error('전투를 준비하지 못했어요. 다시 시도해주세요.');
+      if (run !== startRun.current) return;
       decisions.current = [];
       consumed.current = opening.events.length;
       settled.current = false;
@@ -301,32 +353,40 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
       setSettleFailed(false);
       setPhase('battle');
     } catch (error) {
+      if (run !== startRun.current) return;
       onError(error instanceof Error ? error.message : '연결을 확인한 뒤 다시 시도해주세요.');
     } finally {
-      setStarting(false);
+      if (run === startRun.current) setStarting(false);
     }
   }
 
-  function act(action: 'attack' | 'skill') {
+  function act(action: 'attack' | 'skill', skillId?: string) {
     if (!setup || !state || !state.activeUid || state.status !== 'active' || queue.length) return;
     const uid = state.activeUid;
-    const played = [...decisions.current, { uid, action }];
-    const profile = OPPONENTS.find((opponent) => opponent.id === setup.opponentId)?.profile ?? DEFAULT_PROFILE;
-    const result = runBattle(setup as BattleSetup, played, createOpponentDecider(profile));
-    if (result.error && result.error !== 'unfinished') {
-      setNotice(result.error === 'energy' ? '기운이 부족해요.' : '지금은 그 행동을 할 수 없어요.');
+    // The base signature is sent without an id; an unlocked skill carries its own id so the
+    // server re-simulation replays exactly the ability the player saw in the button.
+    const decision: Decision = skillId ? { uid, action, skillId } : { uid, action };
+    const profile = profileFor(setup.opponentId, setup.mode ?? 'normal');
+    const result = stepBattle(state, decision, createOpponentDecider(profile));
+    if (result.error) {
+      setNotice(
+        result.error === 'energy' ? '기운이 부족해요.'
+        : result.error === 'cooldown' ? '스킬 재사용 대기 중이에요.'
+        : result.error === 'skill' ? '아직 해금하지 못한 스킬이에요.'
+        : '지금은 그 행동을 할 수 없어요.'
+      );
       return;
     }
-    const fresh = result.events.slice(consumed.current);
-    consumed.current = result.events.length;
-    decisions.current = played;
+    decisions.current.push(decision);
+    consumed.current = result.state.log.length;
     setNotice(null);
     setState(result.state);
-    setQueue((pending) => [...pending, ...fresh]);
+    setQueue((pending) => [...pending, ...result.events]);
   }
 
   function reset() {
     settleRun.current += 1;
+    startRun.current += 1;
     decisions.current = [];
     consumed.current = 0;
     settled.current = false;
@@ -377,6 +437,27 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
           </div>
         </header>
 
+        <section className="mode-picker" aria-labelledby="mode-title">
+          <div className="opponent-heading">
+            <h2 id="mode-title">난이도 모드</h2>
+            <p className="deck-hint" role="status"><Icon name={(clearedByMode[mode]?.length ?? 0) >= OPPONENTS.length ? 'check' : 'sparkle'} />{MODE_LABELS[mode]} 모드 · {clearedByMode[mode]?.length ?? 0} / {OPPONENTS.length} 격파</p>
+          </div>
+          <div className="mode-selector" role="group" aria-label="난이도 모드 선택">
+            {BATTLE_MODES.map((item) => {
+              const unlocked = unlockedModes.includes(item);
+              const cleared = clearedByMode[item]?.length ?? 0;
+              return <button key={item} className="mode-chip" aria-pressed={mode === item} disabled={!unlocked || starting} onClick={() => setMode(item)}>
+                <strong>{MODE_LABELS[item]}</strong>
+                <small>{unlocked ? `격파 ${cleared} / ${OPPONENTS.length}` : MODE_UNLOCK_HINT[item]}</small>
+                {unlocked && cleared >= OPPONENTS.length && <Icon name="check" />}
+              </button>;
+            })}
+          </div>
+          <p className="mode-note">{mode === 'normal'
+            ? '기본 난이도입니다. 여기서 상대를 모두 격파하면 상위 모드가 열려요.'
+            : `${MODE_LABELS[mode]} 모드는 상대가 더 강하고 첫 격파 보상이 ${MODE_CREDITS_MULTIPLIER[mode]}배이며, 확정권 드롭 확률도 올라갑니다.`}</p>
+        </section>
+
         {chosenLegal ? (
           <section className="battle-deck" aria-labelledby="battle-deck-title">
             <div className="battle-deck-head">
@@ -392,7 +473,15 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
               ))}
             </div>
             <ul className="deck-preview">
-              {chosenCards.map((card) => <li key={card.id}><CardArtwork card={card} /><span>{card.name}</span></li>)}
+              {chosenCards.map((card) => {
+                const level = enhanceMap.get(card.id) ?? 0;
+                return (
+                  <li key={card.id}>
+                    <CardArtwork card={card} enhanceLevel={level} />
+                    <span>{card.name}{level > 0 ? ` +${level}` : ''}</span>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ) : (
@@ -422,30 +511,36 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
               </header>
               <p className="opponent-blurb">{daily.description}</p>
               <p className="opponent-reward"><Icon name="ticket" />첫 클리어 보상 {daily.rewardCredits}장 · 상대 {daily.opponentName}</p>
-              <button className="btn btn-primary" disabled={!chosenLegal || starting} onClick={() => void start(daily.opponentId, 'daily')}>
+              <button className="btn btn-primary" disabled={!chosenLegal || starting} onClick={() => void start(daily.opponentId, 'daily', 'normal')}>
                 이 덱으로 전투<Icon name="arrow" />
               </button>
             </article>
           ))}
           <ul className="opponent-grid">
-            {OPPONENTS.map((opponent) => (
-              <li key={opponent.id}>
-                <article className="opponent-card">
-                  <header>
-                    <div>
-                      <h3>{opponent.name}</h3>
-                      <p className="opponent-title">{opponent.title}</p>
-                    </div>
-                    <span className="difficulty">{DIFFICULTY_LABEL[opponent.difficulty] ?? opponent.difficulty}</span>
-                  </header>
-                  <p className="opponent-blurb">{opponent.blurb}</p>
- <p className="opponent-reward"><Icon name="ticket" />{opponent.reward.label} {opponent.reward.credits}장</p>
-                  <button className="btn btn-dark" disabled={!chosenLegal || starting} onClick={() => void start(opponent.id, 'pve')}>
-                    이 덱으로 전투<Icon name="arrow" />
-                  </button>
-                </article>
-              </li>
-            ))}
+            {OPPONENTS.map((base) => {
+              // Mode changes the opponent's team, AI profile and first-clear reward; read them
+              // from the same lib lookup the server uses so the card cannot misstate the fight.
+              const opponent = opponentById(base.id, mode) ?? base;
+              const cleared = clearedByMode[mode]?.includes(base.id) ?? false;
+              return (
+                <li key={base.id}>
+                  <article className="opponent-card">
+                    <header>
+                      <div>
+                        <h3>{opponent.name}{cleared && <span className="clear-badge"><Icon name="check" />격파</span>}</h3>
+                        <p className="opponent-title">{opponent.title}</p>
+                      </div>
+                      <span className="difficulty">{DIFFICULTY_LABEL[opponent.difficulty] ?? opponent.difficulty}</span>
+                    </header>
+                    <p className="opponent-blurb">{opponent.blurb}</p>
+                    <p className="opponent-reward"><Icon name="ticket" />{cleared ? '첫 보상 수령 완료 · 확정권 드롭 도전' : `${opponent.reward.label} ${opponent.reward.credits}장`}</p>
+                    <button className="btn btn-dark" disabled={!chosenLegal || starting} onClick={() => void start(opponent.id, 'pve', mode)}>
+                      이 덱으로 전투<Icon name="arrow" />
+                    </button>
+                  </article>
+                </li>
+              );
+            })}
           </ul>
         </section>
       </section>
@@ -464,15 +559,27 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
       : state.status;
   const canAct = myTurn && !animating;
   const ability = active?.ability ?? null;
-  const skillCost = ability?.cost ?? 0;
-  const skillReady = !!active && !!ability && active.cooldown === 0 && active.energy >= skillCost;
+  /** Unlocked enhancement skills, in +5 / +10 / +15 order. Empty for opponents and low enhance. */
+  const unlockedSkills = active?.skills ?? [];
+  const cooldownLeft = active?.cooldown ?? 0;
+  const energy = active?.energy ?? 0;
+  /** Energy and cooldown are ONE pool per combatant: every skill button reads the same two values. */
+  const readyToUse = (skill: Ability) => canAct && cooldownLeft === 0 && energy >= skill.cost;
+  const blockedReason = (skill: Ability): string | null => {
+    if (!myTurn) return '상대 차례예요.';
+    if (animating) return '연출 중이에요.';
+    if (cooldownLeft > 0) return `공용 재사용 ${cooldownLeft}턴 남음`;
+    if (energy < skill.cost) return `기운 ${skill.cost} 필요 · 현재 ${energy}`;
+    return null;
+  };
+  const skillReady = canAct && cooldownLeft === 0 && !!ability && energy >= ability.cost;
+  const anySkillReady = skillReady || (canAct && cooldownLeft === 0 && unlockedSkills.some((skill) => energy >= skill.cost));
   const actionHint = state.status !== 'active'
     ? null
     : animating ? '방금 일어난 일을 보여주는 중이에요.'
     : !myTurn ? `${active?.name ?? '상대'}의 차례를 기다리는 중이에요.`
-    : !skillReady ? (active && active.cooldown > 0
-      ? `스킬은 ${active.cooldown}턴 뒤에 다시 쓸 수 있어요.`
-      : `스킬에는 기운 ${skillCost}이 필요해요. 지금 기운은 ${active?.energy ?? 0}.`)
+    : cooldownLeft > 0 ? `스킬은 공용 재사용 ${cooldownLeft}턴 뒤에 다시 쓸 수 있어요.`
+    : !anySkillReady ? `스킬에 쓸 기운이 모자라요. 지금 기운은 ${energy}.`
     : '내 차례예요. 행동을 골라주세요.';
   const fxFor = (uid: string) => fx.find((item) => item.uid === uid) ?? null;
 
@@ -481,7 +588,7 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
       <div className="battle-stage">
         <header className="battle-head">
           <div>
-            <p className="eyebrow">{state.kind === 'daily' ? 'DAILY CHALLENGE' : 'PVE BATTLE'}</p>
+            <p className="eyebrow">{state.kind === 'daily' ? 'DAILY CHALLENGE' : `PVE BATTLE · ${MODE_LABELS[setup?.mode ?? 'normal']}`}</p>
             <h1 id="battle-arena-title">{setup?.opponentName ?? '대련'}</h1>
             <p className="battle-rule"><Icon name="sparkle" />{modifierLabel(state.modifier)}</p>
           </div>
@@ -489,6 +596,17 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
             <span className="meta-label">라운드</span>
             <strong>{state.round}</strong>
             <small>상대 {state.sides.b.filter((combatant) => combatant.hp > 0).length} / {state.sides.b.length} 남음</small>
+            <label className="battle-pace">
+              <span className="meta-label">전투 연출</span>
+              <select
+                value={activePace}
+                disabled={reduced}
+                title={reduced ? '동작 줄이기 설정에서는 즉시 진행으로 표시됩니다.' : '전투 기록의 재생 속도만 바꿉니다. 전투 규칙은 그대로입니다.'}
+                onChange={(event) => setPace(event.target.value as BattlePace)}
+              >
+                {PACE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
           </div>
         </header>
 
@@ -508,7 +626,7 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
           </div>
           <div className="battle-row ally" role="group" aria-label="내 팀">
             {state.sides.a.map((combatant) => (
-              <UnitTile key={combatant.uid} c={combatant} sig={signature(combatant)} card={byId.get(combatant.cardId)} fx={fxFor(combatant.uid)} active={activeUid === combatant.uid} reduced={reduced} />
+              <UnitTile key={combatant.uid} c={combatant} sig={signature(combatant)} card={byId.get(combatant.cardId)} fx={fxFor(combatant.uid)} active={activeUid === combatant.uid} reduced={reduced} enhanceLevel={enhanceMap.get(combatant.cardId) ?? 0} />
             ))}
           </div>
           {state.status !== 'active' && (
@@ -537,16 +655,31 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
                 <small>기운 소모 없음</small>
               </span>
             </button>
-            <button className="battle-action is-skill" disabled={!canAct || !skillReady} onClick={() => act('skill')}>
-              <Icon name="sparkle" />
-              <span>
-                <strong>{ability?.name ?? '스킬'}</strong>
-                <small>기운 {skillCost}{ability && ability.cooldown > 0 ? ` · ${ability.cooldown}턴 대기` : ''}</small>
-                {ability && <em>{ability.description}</em>}
-              </span>
-            </button>
+            {ability && (
+              <button className="battle-action is-skill" disabled={!readyToUse(ability)} onClick={() => act('skill')}>
+                <Icon name="sparkle" />
+                <span>
+                  <strong>{ability.name}</strong>
+                  <small>기운 {ability.cost}{ability.cooldown > 0 ? ` · ${ability.cooldown}턴 대기` : ''} · 기본 기술</small>
+                  <em>{describeOps(ability.ops)}</em>
+                  {blockedReason(ability) && <i className="skill-block">{blockedReason(ability)}</i>}
+                </span>
+              </button>
+            )}
+            {unlockedSkills.map((skill) => (
+              <button key={skill.id} className="battle-action is-skill is-unlocked" disabled={!readyToUse(skill)} onClick={() => act('skill', skill.id)}>
+                <Icon name="sparkle" />
+                <span>
+                  <strong>{skill.name}</strong>
+                  <small>기운 {skill.cost}{skill.cooldown > 0 ? ` · ${skill.cooldown}턴 대기` : ''} · 해금 기술</small>
+                  <em>{describeOps(skill.ops)}</em>
+                  <i className="skill-flavor">{skill.description}</i>
+                  {blockedReason(skill) && <i className="skill-block">{blockedReason(skill)}</i>}
+                </span>
+              </button>
+            ))}
             <p className="action-hint" role="status">
-              <Icon name={animating || !myTurn ? 'clock' : skillReady ? 'check' : 'sparkle'} />
+              <Icon name={animating || !myTurn ? 'clock' : anySkillReady ? 'check' : 'sparkle'} />
               {notice ?? actionHint}
             </p>
           </div>
@@ -567,7 +700,7 @@ export function BattleView({ user, decks, cards, daily, onStateChange, onNavigat
               <div className="result-summary">
                 {!!summary.rewards.length && (
                   <ul className="reward-list">
-                    {summary.rewards.map((reward) => <li key={reward.label}><Icon name="ticket" /><span>{reward.label}</span><strong>+{reward.credits}</strong></li>)}
+                    {summary.rewards.map((reward) => <li key={reward.label}><Icon name="ticket" /><span>{reward.label}</span><strong>{reward.ticketType ? `+${reward.quantity ?? 0}장` : `+${reward.credits}`}</strong></li>)}
                   </ul>
                 )}
                 {!!summary.unlocked.length && (

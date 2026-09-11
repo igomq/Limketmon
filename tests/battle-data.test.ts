@@ -8,6 +8,7 @@ import { ABILITY_RULESET, CURATED_ABILITIES, abilityFor, validateAbility, valida
 import { DEFAULT_OPPONENT_ID, OPPONENTS, opponentById } from '../lib/battle/opponents.ts';
 import { RARITY_COST, STAT_RULESET, battleStats, elementOf } from '../lib/battle/stats.ts';
 import { ELEMENTS } from '../lib/battle/types.ts';
+import { enhancePower } from '../lib/enhance.ts';
 
 const cards = manifest.cards as Card[];
 const byId = new Map(cards.map((card) => [card.id, card]));
@@ -16,27 +17,39 @@ const cardById = (id: string): Card => {
   assert.ok(card, `unknown card ${id}`);
   return card;
 };
-const RARITY_HP_BONUS: Record<Card['rarity'], number> = { N: 0, R: 6, SR: 12, SSR: 20, UR: 26 };
-const BASE_STAT_SCALE = 0.7;
+const POWER_ANCHOR = 180;
 
-test('stats: every curated card derives stats inside the documented bands', () => {
+test('stats: rarity-normalized derivation matches the documented power anchors', () => {
   assert.equal(cards.length, 46);
   for (const card of cards) {
     const stats = battleStats(card);
-    assert.equal(stats.atk, Math.max(1, Math.round(card.attack * BASE_STAT_SCALE)), card.id);
-    assert.equal(stats.def, Math.max(1, Math.round(card.defense * BASE_STAT_SCALE)), card.id);
-    assert.equal(stats.maxHp, 40 + Math.round(card.defense * 0.62) + RARITY_HP_BONUS[card.rarity], card.id);
-    assert.ok(stats.maxHp >= 50 && stats.maxHp <= 140, `${card.id} maxHp ${stats.maxHp}`);
+    assert.ok(Number.isInteger(stats.maxHp) && stats.maxHp > 0, `${card.id} maxHp ${stats.maxHp}`);
+    assert.ok(stats.atk >= 1 && stats.def >= 1, card.id);
     assert.equal(stats.spd, 10 + Math.floor(card.luck / 4), card.id);
     assert.ok(stats.spd >= 10 && stats.spd <= 35, `${card.id} spd`);
     assert.ok(stats.crit >= 5 && stats.crit <= 15, `${card.id} crit`);
     assert.ok(ELEMENTS.includes(stats.element), `${card.id} element ${stats.element}`);
     assert.equal(stats.cost, RARITY_COST[card.rarity], card.id);
   }
+  // The rarity's MEAN derived power (HP + 2*ATK + DEF) sits on 180 * POWER_CURVE(rarity, 0), which
+  // is what makes N5=R3=SR0 and friends line up once the enhance curve is applied.
+  for (const rarity of ['N', 'R', 'SR', 'SSR', 'UR'] as const) {
+    const pool = cards.filter((card) => card.rarity === rarity).map(battleStats);
+    const mean = pool.reduce((sum, stats) => sum + stats.maxHp + stats.atk * 2 + stats.def, 0) / pool.length;
+    const target = POWER_ANCHOR * enhancePower(rarity, 0);
+    assert.ok(Math.abs(mean - target) / target < 0.15, `${rarity} mean ${mean.toFixed(1)} vs ${target.toFixed(1)}`);
+  }
+  // Higher rarity buys more raw power at the same level; low rarity is never the stronger one.
+  const meanOf = (rarity: Card['rarity']) => {
+    const pool = cards.filter((card) => card.rarity === rarity).map(battleStats);
+    return pool.reduce((sum, stats) => sum + stats.maxHp + stats.atk * 2 + stats.def, 0) / pool.length;
+  };
+  const ladder = (['N', 'R', 'SR', 'SSR', 'UR'] as const).map(meanOf);
+  for (let index = 1; index < ladder.length; index++) assert.ok(ladder[index]! > ladder[index - 1]!);
 });
 
 test('stats: ability identity is stable and keeps the curated Korean copy', () => {
-  assert.equal(STAT_RULESET, 2);
+  assert.equal(STAT_RULESET, 3);
   assert.equal(ABILITY_RULESET, 2);
   for (const card of cards) {
     const { ability } = battleStats(card);

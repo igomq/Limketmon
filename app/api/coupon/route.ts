@@ -11,7 +11,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '쿠폰 코드를 입력하세요.' }, { status: 400 });
     }
     await ensureUser(user.userId, user.email);
-    return NextResponse.json({ snapshot: await redeemCoupon(user.userId, body.code) });
+    // `granted` is derived from the row's actual change, so the client can show the real payout.
+    return NextResponse.json(await redeemCoupon(user.userId, body.code));
   } catch (error) {
     if (error instanceof GameError) return NextResponse.json({ error: error.message }, { status: 400 });
     console.error('Coupon redemption failed', error);

@@ -7,8 +7,12 @@ import type { Rarity } from '../rules.ts';
  * Bumped whenever a rule change can alter the outcome of a battle for the same seed + decisions.
  * 2: energy regen 1/turn, round cap 40, wounded-only N self-heal.
  * 3: lower base card stats; player enhance levels are snapshotted into the battle.
+ * 4: rarity-normalized card stats and per-mode opponents; old pending rows are refused.
  */
-export const BATTLE_RULESET_VERSION = 3;
+export const BATTLE_RULESET_VERSION = 4;
+
+export const BATTLE_MODES = ['normal', 'hard', 'chaos'] as const;
+export type BattleMode = (typeof BATTLE_MODES)[number];
 
 export const ELEMENTS = ['light', 'shadow', 'iron', 'nature', 'spark'] as const;
 export type Element = (typeof ELEMENTS)[number];
@@ -127,6 +131,8 @@ export interface Combatant {
   energy: number;
   cooldown: number;
   ability: Ability;
+  /** Additional active skills unlocked by duplicate enhancement. Empty for opponents and old snapshots. */
+  skills: Ability[];
   statuses: StatusInstance[];
 }
 
@@ -141,6 +147,8 @@ export interface CombatantSeed {
   spd: number;
   crit: number;
   ability: Ability;
+  /** Unlocked enhancement skills (never the base ability). Omitted for opponents and old snapshots. */
+  skills?: Ability[];
   /** Player-side duplicate enhance. Omitted or 0 for opponents and old snapshots. */
   enhance?: number;
 }
@@ -149,6 +157,8 @@ export interface BattleSetup {
   /** Server issued id when the battle is authoritative; omitted in tests. */
   battleId?: string;
   kind: BattleKind;
+  /** Difficulty mode the setup was built under. Omitted means 'normal'. */
+  mode?: BattleMode;
   opponentId: string;
   modifier: BattleModifier;
   /** 32-bit unsigned seed. */
@@ -211,6 +221,12 @@ export interface Decision {
   /** Must equal state.activeUid; a mismatch is an illegal decision. */
   uid: string;
   action: 'attack' | 'skill';
+  /**
+   * Which skill to fire. Omitted means the combatant's base signature ability, which is also what
+   * every pre-skill log stored. When present it must match one of the actor's unlocked
+   * `skills`; anything else (including an id on an `attack`) is rejected before any mutation.
+   */
+  skillId?: string;
 }
 
 export interface AdvanceResult {
@@ -243,6 +259,8 @@ export interface Opponent {
   cards: string[];
   /** Applied to every derived combat stat; keeps difficulty honest without hand-tuning decks. */
   hpScale: number;
+  /** Multiplier for ATK and DEF. Scales with difficulty mode to keep fights threatening. */
+  statScale?: number;
   profile: AiProfile;
   reward: { credits: number; label: string };
 }

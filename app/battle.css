@@ -377,3 +377,50 @@
 @media (max-width: 640px) {
   .enhance-panel { padding: 1rem; }
 }
+
+/* ---------- battle: difficulty mode picker ---------- */
+.mode-picker { margin-top: 2.5rem; }
+.mode-selector { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; }
+.mode-chip { position: relative; display: flex; flex-direction: column; gap: .25rem; padding: .9rem 1rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--paper); text-align: left; }
+.mode-chip[aria-pressed='true'] { border-color: var(--accent); background: linear-gradient(180deg, var(--accent-wash), var(--paper) 70%); }
+.mode-chip:disabled { opacity: .55; }
+.mode-chip strong { font-size: 1rem; letter-spacing: -.02em; }
+.mode-chip small { font-size: .75rem; color: var(--secondary); }
+.mode-chip > .icon { position: absolute; top: .9rem; right: .9rem; width: 1rem; height: 1rem; color: #236043; }
+.mode-note { margin-top: .85rem; font-size: .8125rem; line-height: 1.7; color: var(--secondary); }
+.clear-badge { display: inline-flex; align-items: center; gap: .2rem; margin-left: .5rem; padding: .1rem .45rem; border-radius: 2rem; background: #e6f4ec; color: #1f6b45; font-size: .6875rem; font-weight: 650; vertical-align: middle; }
+.clear-badge .icon { width: .8rem; height: .8rem; }
+.battle-card-next { display: flex; align-items: flex-start; gap: .5rem; margin: .9rem 0 0; padding-top: .9rem; border-top: 1px solid var(--line); font-size: .8125rem; color: var(--secondary); }
+.battle-card-next .icon { width: 1rem; height: 1rem; margin-top: .1rem; color: var(--accent); }
+.battle-card-next strong { color: var(--ink); font-weight: 650; }
+.battle-card-next small { display: block; margin-top: .2rem; color: var(--muted); font-size: .6875rem; }
+@media (max-width: 640px) {
+  .mode-selector { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------- battle: playback pace + enhancement unlock skills ---------- */
+.battle-pace { display: flex; flex-direction: column; align-items: end; gap: .2rem; margin-top: .55rem; }
+.battle-pace select { padding: .3rem .5rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--paper); color: var(--ink); font: inherit; font-size: .8125rem; }
+.battle-pace select:disabled { opacity: .7; }
+/* A disabled action still shows why: dim the shell, keep the reason text readable. */
+.battle-action:disabled { border-color: var(--line); background: #f3f4f6; }
+.battle-action:disabled strong { color: var(--secondary); }
+.battle-action.is-unlocked { border-color: #bfd8ea; background: #eef5fb; }
+.battle-action.is-unlocked .icon { color: #2b6ea8; }
+.skill-block { display: block; margin-top: .25rem; font-size: .6875rem; font-style: normal; font-weight: 650; color: #a3372c; }
+.skill-flavor { display: -webkit-box; margin-top: .15rem; font-size: .6875rem; font-style: normal; line-height: 1.5; color: var(--muted); overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+.enhance-skill-panel { margin-top: 1rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+.enhance-skill-intro { margin: .35rem 0 .75rem; font-size: .8125rem; line-height: 1.7; color: var(--secondary); }
+.enhance-skill-list { display: flex; flex-direction: column; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.enhance-skill-list li { padding: .65rem .8rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--paper); }
+.enhance-skill-list li[data-locked='true'] { background: #f4f5f7; }
+.enhance-skill-head { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.enhance-skill-head strong { font-size: .9375rem; letter-spacing: -.02em; }
+.enhance-skill-level { flex: 0 0 auto; color: var(--secondary); font-size: .6875rem; }
+.enhance-skill-list li[data-locked='true'] .enhance-skill-level { color: #a3372c; }
+.enhance-skill-ops { display: flex; align-items: flex-start; gap: .35rem; margin: .35rem 0 0; font-size: .75rem; color: var(--secondary); }
+.enhance-skill-ops .icon { width: .95rem; height: .95rem; margin-top: .12rem; color: var(--accent); }
+.enhance-skill-flavor { margin: .25rem 0 0; font-size: .75rem; line-height: 1.6; color: var(--muted); }
+.enhance-skill-next { margin: .75rem 0 0; font-size: .8125rem; color: var(--secondary); }
+.enhance-skill-next strong { color: var(--ink); font-weight: 650; }

@@ -228,7 +228,8 @@ test('existing collection behaviour is unchanged: free pull, coupon, starter dec
   assert.equal(snapshot.daily.cleared, false);
 
   const coupon = await game.redeemCoupon(USER, 'limketmon');
-  assert.equal(coupon.credits, 100);
+  assert.equal(coupon.snapshot.credits, 100);
+  assert.deepEqual(coupon.granted, { credits: 100, sr: 0, ssr: 0 });
   await assert.rejects(game.redeemCoupon(USER, 'LIMKETMON'), /이미 사용한 쿠폰/);
   await assert.rejects(game.redeemCoupon(USER, 'NOPE'), /유효하지 않은/);
 
@@ -272,6 +273,51 @@ test('replay reproduces the stored battle; an older ruleset is refused, not re-j
   const oldReplay = await game.replayBattle(USER, stale.battleId);
   assert.equal(oldReplay.rulesetVersion, 999, 'the battle keeps the version it was played under');
   assert.equal((await game.getSnapshot(USER)).stats.battles >= 1, true);
+});
+
+test('a chosen unlocked skill round-trips through start, finish, replay and the cached answer', async () => {
+  reset();
+  const owned = cardIdsByRarity({ N: 3 });
+  seedOwned(db, USER, owned);
+  // +5 duplicate enhancement unlocks exactly one additional skill per card.
+  for (const id of owned) {
+    db.exec(`UPDATE inventory SET enhance_level = 5 WHERE user_id = '${USER}' AND card_id = '${id}'`);
+  }
+  const deck = (await game.createDeck(USER, '스킬 덱', owned)).find((entry) => entry.name === '스킬 덱')!;
+  const setup = await game.startBattle(USER, { deckId: deck.id, opponentId: 'rookie' }, DAY);
+  const skills = setup.player.flatMap((entry) => entry.skills ?? []);
+  assert.equal(skills.length, 3, 'each +5 card ships its unlocked skill to the client');
+  const unlockedId = skills[0]!.id;
+  assert.match(unlockedId, /^skill:[^:]+:5$/);
+
+  // Malformed, foreign and not-yet-unlocked ids are all refused without settling the battle, so a
+  // tampered log never freezes the row.
+  await assert.rejects(game.finishBattle(USER, setup.battleId, [{ uid: 'a0', action: 'skill', skillId: 42 }]), /올바르지/);
+  assert.equal((await game.finishBattle(USER, setup.battleId, [{ uid: 'a0', action: 'skill', skillId: 'skill:not-a-card:5' }], DAY)).result, 'invalid');
+  assert.equal((await game.finishBattle(USER, setup.battleId, [{ uid: 'a0', action: 'skill', skillId: `skill:${owned[0]}:15` }], DAY)).result, 'invalid');
+  assert.equal((await game.finishBattle(USER, setup.battleId, [{ uid: 'a0', action: 'attack', skillId: unlockedId }], DAY)).result, 'invalid');
+  const pending = (await db.prepare('SELECT result FROM battles WHERE id = ?').bind(setup.battleId).first()) as { result: string };
+  assert.equal(pending.result, 'pending', 'the rejected attempts leave the battle open');
+
+  const played = playWithSkills(setup);
+  assert.equal(played.usedSkill, true, 'the decided log actually fires an unlocked skill');
+  const settled = await game.finishBattle(USER, setup.battleId, played.decisions, DAY);
+  assert.notEqual(settled.result, 'invalid', 'the chosen-skill log replays as a legal battle');
+  const stored = (await db.prepare('SELECT decisions, result FROM battles WHERE id = ?').bind(setup.battleId).first()) as { decisions: string; result: string };
+  assert.equal(stored.result, settled.result);
+  assert.equal(
+    (JSON.parse(stored.decisions) as Array<{ skillId?: string }>).some((decision) => decision.skillId === unlockedId),
+    true,
+    'the replay persists the chosen skill id'
+  );
+  const replay = await game.replayBattle(USER, setup.battleId);
+  assert.equal(replay.verified, true, 'the stored skill log re-simulates to the stored result');
+  assert.equal(replay.result, settled.result);
+
+  // The cached repeat call returns the identical settled summary and pays nothing again.
+  const credits = await creditsOf(USER);
+  assert.deepEqual(await game.finishBattle(USER, setup.battleId, played.decisions, DAY), settled);
+  assert.equal(await creditsOf(USER), credits);
 });
 
 function sumRewards(summary: { rewards: Array<{ credits: number }> }): number {
@@ -342,6 +388,52 @@ function play(_userId: string, setup: Awaited<ReturnType<typeof game.startBattle
     if (isPlayer) decisions.push({ uid, action });
   }
   return { decisions, result: state.status };
+}
+
+/**
+ * Like play(), but the player fires its first unlocked skill whenever it is legal and falls back
+ * to a plain attack otherwise, so the server sees an explicit skill id in the decision log.
+ */
+function playWithSkills(setup: Awaited<ReturnType<typeof game.startBattle>>) {
+  const full = buildSetup({
+    kind: setup.kind,
+    opponentId: setup.opponentId,
+    modifier: setup.modifier,
+    seed: setup.seed,
+    playerCardIds: setup.player.map((entry) => entry.cardId),
+    playerEnhance: setup.player.map((entry: { enhance?: number }) => entry.enhance ?? 0),
+    battleId: setup.battleId
+  });
+  const profile = opponentById(setup.opponentId)!.profile;
+  let state = createBattle(full);
+  const decisions: Array<{ uid: string; action: 'attack' | 'skill'; skillId?: string }> = [];
+  let usedSkill = false;
+  for (let step = 0; step < 500 && state.status === 'active'; step++) {
+    const uid = state.activeUid;
+    if (!uid) break;
+    if (uid.startsWith('a')) {
+      const actor = [...state.sides.a, ...state.sides.b].find((entry) => entry.uid === uid)!;
+      const skillId = (actor.skills ?? [])[0]?.id;
+      let decision: { uid: string; action: 'attack' | 'skill'; skillId?: string } = skillId
+        ? { uid, action: 'skill', skillId }
+        : { uid, action: 'attack' };
+      let result = advance(state, decision);
+      if (result.error) {
+        decision = { uid, action: 'attack' };
+        result = advance(state, decision);
+      }
+      if (result.error) throw new Error(`unexpected engine error: ${result.error}`);
+      state = result.state;
+      decisions.push(decision);
+      if (decision.skillId) usedSkill = true;
+    } else {
+      const action = aiDecision(state, profile).action;
+      const result = advance(state, { uid, action });
+      if (result.error) throw new Error(`unexpected opponent error: ${result.error}`);
+      state = result.state;
+    }
+  }
+  return { decisions, usedSkill, result: state.status };
 }
 
 async function findDay(predicate: (challenge: ReturnType<typeof dailyChallenge>) => boolean) {

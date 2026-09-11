@@ -1,5 +1,5 @@
 // Wire contract shared by the battle API routes and the client screens.
-import type { BattleKind, BattleModifier, CombatantSeed } from './types.ts';
+import type { BattleKind, BattleMode, BattleModifier, CombatantSeed } from './types.ts';
 
 export interface DeckSummary {
   id: string;
@@ -26,6 +26,7 @@ export interface BattleSetupResponse {
   ruleset: number;
   seed: number;
   kind: BattleKind;
+  mode: BattleMode;
   opponentId: string;
   opponentName: string;
   opponentTitle: string;
@@ -38,6 +39,9 @@ export interface BattleSetupResponse {
 export interface RewardLine {
   readonly label: string;
   readonly credits: number;
+  /** Set on guaranteed-pull ticket payouts; credits are 0 for those lines. */
+  readonly ticketType?: 'sr' | 'ssr';
+  readonly quantity?: number;
 }
 
 export interface BattleResultSummary {
