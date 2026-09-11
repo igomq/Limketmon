@@ -2,7 +2,7 @@
 
 import { AnimatePresence, MotionConfig, motion, useMotionValue, useReducedMotion, useTransform, animate } from 'motion/react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import type { Card, PullResult, Snapshot } from '../lib/game';
+import type { Card, CouponGrant, PullResult, Snapshot } from '../lib/game';
 import type { BattleSummaryRow, DeckSummary } from '../lib/battle/api';
 import type { BattleMode } from '../lib/battle/types';
 import { RARITY_ORDER, RARITY_WEIGHTS, type Rarity } from '../lib/rules';
@@ -62,13 +62,24 @@ const countOptions = (balance: number): Array<1 | 5 | 10> => (balance >= 10 ? [1
 const ticketBalance = (snapshot: Snapshot, type: TicketType) =>
   type === 'low' ? snapshot.tickets.low : type === 'normal' ? snapshot.credits : type === 'sr' ? snapshot.tickets.sr : snapshot.tickets.ssr;
 
-/** Reports what a coupon actually added, so the copy can never promise the wrong pool or count. */
-function couponGain(before: Snapshot, after: Snapshot): string {
-  const parts: string[] = [];
-  if (after.credits > before.credits) parts.push(`뽑기권 ${after.credits - before.credits}장`);
-  if (after.tickets.low > before.tickets.low) parts.push(`하급 뽑기권 ${after.tickets.low - before.tickets.low}장`);
-  if (after.tickets.sr > before.tickets.sr) parts.push(`SR 뽑기권 ${after.tickets.sr - before.tickets.sr}장`);
-  if (after.tickets.ssr > before.tickets.ssr) parts.push(`SSR 뽑기권 ${after.tickets.ssr - before.tickets.ssr}장`);
+/**
+ * Reports what a coupon actually added. The server's grant receipt is authoritative (it includes
+ * card bundles); the wallet delta is only a fallback for a response without one.
+ */
+function couponGain(granted: CouponGrant | undefined, before: Snapshot, after: Snapshot): string {
+  const wallet = (own: number | undefined, was: number, now: number) => own ?? now - was;
+  const tickets: Array<[string, number]> = [
+    ['일반 뽑기권', wallet(granted?.credits, before.credits, after.credits)],
+    ['하급 뽑기권', wallet(granted?.low, before.tickets.low, after.tickets.low)],
+    ['SR 뽑기권', wallet(granted?.sr, before.tickets.sr, after.tickets.sr)],
+    ['SSR 뽑기권', wallet(granted?.ssr, before.tickets.ssr, after.tickets.ssr)]
+  ];
+  const parts = tickets.filter(([, count]) => count > 0).map(([label, count]) => `${label} ${count}장`);
+  if (granted?.cards) {
+    parts.push(granted.cardTypes && granted.copiesPerCard
+      ? `카드 ${granted.cardTypes}종 · 종당 ${granted.copiesPerCard}장 · 총 ${granted.cards}장`
+      : `카드 총 ${granted.cards}장`);
+  }
   return parts.length ? `${parts.join(' · ')}이 도착했어요.` : '쿠폰이 적용됐어요.';
 }
 
@@ -202,10 +213,10 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
     setFeedback(null);
     try {
       const response = await fetch('/api/coupon', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
-      const data = await response.json() as { error?: string; snapshot?: Snapshot };
+      const data = await response.json() as { error?: string; snapshot?: Snapshot; granted?: CouponGrant };
       if (!response.ok || !data.snapshot) throw new Error(data.error || '쿠폰을 확인하지 못했어요. 다시 시도해주세요.');
       setSnapshot(data.snapshot);
-      setFeedback({ text: `${couponGain(before, data.snapshot)} 새로운 카드를 만나보세요.`, error: false });
+      setFeedback({ text: `${couponGain(data.granted, before, data.snapshot)} 새로운 카드를 만나보세요.`, error: false });
       form.reset();
     } catch (error) {
       setFeedback({ text: error instanceof Error ? error.message : '연결을 확인한 뒤 다시 시도해주세요.', error: true });
@@ -279,6 +290,7 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
         key={selected.id}
         card={selected}
         quantity={inventory.get(selected.id)?.quantity ?? 0}
+        unowned={!inventory.get(selected.id)}
         materialCount={materialsOf(inventory.get(selected.id), snapshot.inventory)}
         enhanceLevel={inventory.get(selected.id)?.enhanceLevel ?? 0}
         obtainedAt={inventory.get(selected.id)?.firstObtainedAt}
@@ -323,7 +335,7 @@ function HomeView({ user, snapshot, cards, catalogCount, ownedBase, onNavigate, 
       <div className="hero-actions"><motion.button className="btn btn-primary" onClick={() => onNavigate('battle')} whileTap={{ scale: 0.97 }}>{snapshot.daily.cleared ? '대련 계속하기' : '오늘의 도전 하러 가기'}<Icon name="arrow" /></motion.button><button className="text-button" onClick={() => onNavigate('deck')}>전투 덱 편집<Icon name="chevron" /></button></div>
     </section>
     <section className="home-collection" aria-labelledby="home-collection-title"><div className="section-head"><div><p className="eyebrow">{recent.length ? 'RECENTLY COLLECTED' : 'CAUGHT ON CAMERA'}</p><h2 id="home-collection-title">{recent.length ? '방금 잡은 신규들' : '이런 신규는 어때요?'}</h2></div><button className="text-button" onClick={() => onNavigate('collection')}>전체 도감<Icon name="arrow" /></button></div>
-      <div className="featured-grid">{featured.map((card) => <div className="gallery-item" key={card.id}><CardButton card={card} quantity={snapshot.inventory.find((item) => item.cardId === card.id)?.quantity} materialCount={materialsOf(snapshot.inventory.find((item) => item.cardId === card.id), snapshot.inventory)} onClick={() => onOpen(card)} /><div className="gallery-item-caption"><span>{cardTitle(card)}</span><span className={`rarity-text rarity-${card.rarity}`}>{card.rarity}</span></div></div>)}</div>
+      <div className="featured-grid">{featured.map((card) => { const owned = snapshot.inventory.find((item) => item.cardId === card.id); return <div className="gallery-item" key={card.id}><CardButton card={card} quantity={owned?.quantity} materialCount={materialsOf(owned, snapshot.inventory)} unowned={!owned} onClick={() => onOpen(card)} /><div className="gallery-item-caption"><span>{cardTitle(card)}</span><span className={`rarity-text rarity-${card.rarity}`}>{card.rarity}</span></div></div>; })}</div>
     </section>
     <section className="collection-invite"><div><span className="eyebrow">SAME GUY. DIFFERENT PROBLEM.</span><h2>아직 안 본 신규가 있다면.</h2><p>{user ? `${Math.max(0, catalogCount - ownedBase)}종의 신규가 아직 안 잡혔습니다.` : '표정은 제각각. 아무튼 전부 같은 사람.'}</p></div><button className="btn btn-dark" onClick={() => onNavigate(user ? 'pull' : 'collection')}>{user ? '신규 한 장 더 뽑기' : `${catalogCount}종의 신규 보기`}<Icon name="arrow" /></button></section>
   </>;
@@ -386,7 +398,7 @@ function PullView({ user, snapshot, count, onCount, ticketType, onTicketType, bu
       {user ? <motion.button className="btn btn-primary open-pack-button" disabled={busy || !canPull} onClick={onPull} whileTap={{ scale: 0.98 }}>{busy ? '카드 확인 중…' : results.length ? `새 팩 열기 · ${cost}` : `팩 열기 · ${cost}`}<Icon name="arrow" /></motion.button> : <a className="btn btn-primary open-pack-button" href={signIn('pull')}>로그인하고 무료로 열기<Icon name="arrow" /></a>}
       {user && !canPull && !busy && <p className="insufficient">뽑기권이 부족해요. <button onClick={() => onNavigate('coupon')}>쿠폰 입력하기<Icon name="arrow" /></button></p>}
       <div className="pack-balance"><span>하급 뽑기권 <strong>{user ? `${snapshot.tickets.low}장` : '로그인 후 확인'}</strong></span><span>일반 뽑기권 <strong>{user ? `${snapshot.credits}장` : '—'}</strong></span><span>SR 뽑기권 <strong>{user ? `${snapshot.tickets.sr}장` : '—'}</strong></span><span>SSR 뽑기권 <strong>{user ? `${snapshot.tickets.ssr}장` : '—'}</strong></span><span><Icon name="clock" /><ResetClock /></span></div>
-      <details className="odds"><summary>카드 등장 확률<span>확인하기 +</span></summary><div>{RARITY_ORDER.map((rarity) => <div key={rarity}><span className={`rarity-text rarity-${rarity}`}>{rarity}</span><strong>{Math.round((oddsTable.get(rarity) ?? 0) * 1000) / 10}%</strong></div>)}</div>{ticketType === 'low' ? <p>하급 뽑기권은 대련 승리로 모입니다. UR은 나오지 않고, 10장 뽑기에도 무료 횟수는 쓰이지 않습니다.</p> : ticketType === 'sr' || ticketType === 'ssr' ? <p>{TICKET_GUARANTEE[ticketType]} 확정 · {TICKET_LABEL[ticketType]}. 일반 뽑기와 지갑이 따로입니다.</p> : <p>매일 첫 1장은 무료입니다. 여러 장 뽑기에는 무료 횟수가 사용되지 않습니다.</p>}</details>
+      <details className="odds"><summary>카드 등장 확률<span>확인하기 +</span></summary><div>{RARITY_ORDER.filter((rarity) => (oddsTable.get(rarity) ?? 0) > 0).map((rarity) => <div key={rarity}><span className={`rarity-text rarity-${rarity}`}>{rarity}</span><strong>{Math.round((oddsTable.get(rarity) ?? 0) * 1000) / 10}%</strong></div>)}</div>{ticketType === 'low' ? <p>하급 뽑기권은 대련 승리로 모입니다. UR은 나오지 않고, 10장 뽑기에도 무료 횟수는 쓰이지 않습니다.</p> : ticketType === 'sr' || ticketType === 'ssr' ? <p>{TICKET_GUARANTEE[ticketType]} 확정 · {TICKET_LABEL[ticketType]}. 일반 뽑기와 지갑이 따로입니다.</p> : <p>매일 첫 1장은 무료입니다. 여러 장 뽑기에는 무료 횟수가 사용되지 않습니다.</p>}</details>
     </aside></div>
     {!!results.length && <div className="result-actions"><p><Icon name="check" />모든 카드는 이미 도감에 안전하게 저장됐어요.</p><button className="text-button" onClick={() => onNavigate('collection')}>도감에서 보기<Icon name="arrow" /></button></div>}
   </section>;
@@ -449,7 +461,7 @@ function CollectionView({ user, snapshot, cards, catalogCount, ownedBase, filter
     <p className="results-count" role="status">{visible.length}개의 카드{filter.query && ` · “${filter.query}” 검색 결과`}</p>
     {visible.length ? <div className="archive-grid">{visible.map((card) => {
       const owned = inventory.get(card.id);
-      return <div key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`}><CardButton card={card} quantity={owned?.quantity} materialCount={materialsOf(owned, snapshot.inventory)} enhanceLevel={owned?.enhanceLevel} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong>{owned && <CardBadges card={card} progress={owned} />}<span>{owned ? <><Icon name="check" />보유 중 · 강화 재료 {materialsOf(owned, snapshot.inventory)}장{owned.enhanceLevel ? ' · +' + owned.enhanceLevel : ''}</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></div>;
+      return <div key={card.id} className={`archive-item ${user && !owned ? 'not-collected' : ''}`}><CardButton card={card} quantity={owned?.quantity} materialCount={materialsOf(owned, snapshot.inventory)} enhanceLevel={owned?.enhanceLevel} unowned={!!user && !owned} onClick={() => onOpen(card)} /><div className="archive-item-caption"><strong>{cardTitle(card)}</strong>{owned && <CardBadges card={card} progress={owned} />}<span>{owned ? <><Icon name="check" />보유 중 · 강화 재료 {materialsOf(owned, snapshot.inventory)}장{owned.enhanceLevel ? ' · +' + owned.enhanceLevel : ''}</> : user ? '미수집 · 미리보기' : `NO. ${String(card.version).padStart(3, '0')}`}</span></div></div>;
     })}</div> : <div className="empty-state"><Icon name="search" /><h2>{filter.ownership === 'owned' && !snapshot.inventory.length ? '아직 잡힌 신규가 없어요.' : '해당하는 카드가 없어요.'}</h2><p>{filter.ownership === 'owned' && !snapshot.inventory.length ? '오늘의 무료 팩에서 첫 신규를 잡아보세요.' : '다른 검색어를 쓰거나 필터를 바꿔보세요.'}</p><button className="btn btn-dark" onClick={() => { if (filter.ownership === 'owned' && !snapshot.inventory.length) onNavigate('pull'); else onFilter(defaultFilter); }}>{filter.ownership === 'owned' && !snapshot.inventory.length ? '무료 카드 열기' : '필터 초기화'}<Icon name="arrow" /></button></div>}
   </section>;
 }

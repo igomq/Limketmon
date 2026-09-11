@@ -21,6 +21,8 @@ export interface Trait {
   id: TraitId;
   level: number;
   transcended: boolean;
+  spentProof?: number;
+  refundEstimated?: boolean;
 }
 
 /** One owned card row: the catalog card it came from, its effective rarity and its growth state. */
@@ -98,13 +100,15 @@ export function parseTraits(raw: unknown): Trait[] {
   for (const item of value) {
     if (traits.length >= MAX_TRAITS) break;
     if (!item || typeof item !== 'object') continue;
-    const row = item as { id?: unknown; level?: unknown; transcended?: unknown };
+    const row = item as { id?: unknown; level?: unknown; transcended?: unknown; spentProof?: unknown; refundEstimated?: unknown };
     if (typeof row.id !== 'string' || !TRAIT_ID_SET.has(row.id)) continue;
     if (traits.some((trait) => trait.id === row.id)) continue;
     traits.push({
       id: row.id as TraitId,
       level: clampTraitLevel(Number(row.level)),
-      transcended: row.transcended === true
+      transcended: row.transcended === true,
+      ...(typeof row.spentProof === 'number' && Number.isSafeInteger(row.spentProof) && row.spentProof >= 0 ? { spentProof: row.spentProof } : {}),
+      ...(typeof row.refundEstimated === 'boolean' ? { refundEstimated: row.refundEstimated } : {})
     });
   }
   return traits;

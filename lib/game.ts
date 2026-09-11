@@ -335,12 +335,22 @@ function ticketMessage(ticketType: TicketType, count: number): string {
 }
 
 
-interface CouponGrant {
+/** What one redemption actually added. Counts are read back from the write, never assumed. */
+export interface CouponGrant {
   low: number;
   credits: number;
   sr: number;
   ssr: number;
+  /** Total card copies added, when the coupon granted cards instead of tickets. */
+  cards?: number;
+  /** Distinct cards that actually gained copies. */
+  cardTypes?: number;
+  /** Copies per card type when every written row moved by the same amount. */
+  copiesPerCard?: number;
 }
+
+/** Copies of every catalog card the private card coupon writes per redemption. */
+const CARD_COUPON_COPIES = 100;
 
 /** Case-insensitive once-per-user coupons. The 100-p coupons grant 20 guaranteed tickets each. */
 const COUPONS: Record<string, CouponGrant> = {
@@ -364,10 +374,39 @@ export async function redeemCoupon(userId: string, rawCode: string): Promise<{ s
   const db = getDatabase();
   const secret = privateCouponCode();
   if (secret && code === secret) {
-    await db.batch(cards.map((card) => db.prepare(`INSERT INTO inventory (user_id, card_id, quantity, first_obtained_at)
-      VALUES (?, ?, 100, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 100`)
-      .bind(userId, card.id, new Date().toISOString())));
-    return { snapshot: await getSnapshot(userId), granted: { credits: 0, low: 0, sr: 0, ssr: 0 } };
+    const now = new Date().toISOString();
+    // One transaction: read the inventory, write every catalog row, read it back. The receipt is the
+    // difference the database actually shows, so the coupon can never report a grant it did not make.
+    const batchResults = await db.batch([
+      db.prepare('SELECT card_id, quantity FROM inventory WHERE user_id = ?').bind(userId),
+      ...cards.map((card) => db.prepare(`INSERT INTO inventory (user_id, card_id, quantity, first_obtained_at)
+        VALUES (?, ?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?`)
+        .bind(userId, card.id, CARD_COUPON_COPIES, now, CARD_COUPON_COPIES)),
+      db.prepare('SELECT card_id, quantity FROM inventory WHERE user_id = ?').bind(userId)
+    ]);
+    const beforeResult = batchResults[0]!;
+    const afterResult = batchResults[batchResults.length - 1]!;
+    const before = new Map(
+      (beforeResult.results as Array<{ card_id: string; quantity: number }>).map(
+        (row) => [row.card_id, Number(row.quantity)] as [string, number]
+      )
+    );
+    const added = (afterResult.results as Array<{ card_id: string; quantity: number }>)
+      .map((row) => Number(row.quantity) - (before.get(row.card_id) ?? 0))
+      .filter((delta) => delta > 0);
+    const cardTypes = added.length;
+    return {
+      snapshot: await getSnapshot(userId),
+      granted: {
+        credits: 0,
+        low: 0,
+        sr: 0,
+        ssr: 0,
+        cards: added.reduce((sum, delta) => sum + delta, 0),
+        cardTypes,
+        copiesPerCard: cardTypes && added.every((delta) => delta === added[0]) ? added[0]! : 0
+      }
+    };
   }
   const grant = COUPONS[code];
   if (!grant) throw new GameError('invalid_code', '유효하지 않은 쿠폰 코드입니다.');

@@ -289,7 +289,8 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
 .archive-item-caption strong { font-size: .875rem; font-weight: 600; letter-spacing: -.025em; }
 .archive-item-caption > span { display: flex; align-items: center; gap: .25rem; font-size: .75rem; color: var(--secondary); }
 .archive-item-caption .icon { width: .875rem; height: .875rem; color: #267d50; }
-.not-collected .card-art > img { filter: saturate(.65); }
+.not-collected .card-art > img, .card-art.is-unowned > img { filter: grayscale(1) contrast(.94) brightness(.94); }
+.not-collected .card-frame, .card-art.is-unowned .card-frame { border-color: #c9ccd2; }
 .empty-state { display: flex; flex-direction: column; align-items: center; padding: 5rem 1rem; text-align: center; }
 .empty-state > .icon { width: 2rem; height: 2rem; color: var(--muted); margin-bottom: 1.5rem; }
 .empty-state p { color: var(--secondary); margin: .7rem 0 1.5rem; }
@@ -647,6 +648,7 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
 .wallet-chip { display: flex; flex-direction: column; gap: .15rem; padding: .7rem .85rem; border: 1px solid var(--line); border-radius: .85rem; background: var(--paper); text-align: left; }
 .wallet-chip small { font-size: .6875rem; color: var(--secondary); }
 .wallet-chip strong { font-size: 1.05rem; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.wallet-chip small, .wallet-chip strong { word-break: keep-all; overflow-wrap: anywhere; }
 .wallet-chip.is-proof { border-color: #e6d3b4; background: #fdf8ef; }
 .wallet-chip.is-fragment { border-color: #cfe0ee; background: #f3f8fd; }
 .wallet-chip.is-twin { border-color: #d9c6f3; background: #f7f2ff; }
@@ -660,7 +662,8 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
 .growth-tabs button[aria-pressed='true'] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 3px #20212614; }
 .growth-sort { display: flex; gap: .3rem; margin-top: 1.25rem; }
 .sort-toggle { display: flex; flex-wrap: wrap; gap: .3rem; }
-.sort-toggle button { min-height: 2.5rem; padding: .35rem .8rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--paper); color: var(--secondary); font-size: .8125rem; font-weight: 650; }
+.sort-toggle button { min-height: 2.75rem; padding: .35rem .8rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--paper); color: var(--secondary); font-size: .8125rem; font-weight: 650; }
+.sort-toggle button:hover:not([aria-pressed='true']) { border-color: var(--ink); color: var(--ink); }
 .sort-toggle button[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-dark); }
 .growth-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 1rem .8rem; margin: 1.25rem 0 0; padding: 0; list-style: none; }
 .growth-item { display: flex; min-width: 0; flex-direction: column; gap: .2rem; }
@@ -706,7 +709,10 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
 /* ---------- 합성 · 일괄 분해 ---------- */
 .fuse-rules { display: flex; flex-direction: column; gap: .3rem; margin: .9rem 0; padding: .9rem 1rem; border: 1px solid var(--line); border-radius: .7rem; background: #fbfbfc; font-size: .8125rem; line-height: 1.6; color: var(--secondary); }
 .fuse-rule strong { color: var(--ink); }
-.fuse-controls, .bulk-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; }
+.fuse-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; }
+.bulk-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: .75rem; }
+.bulk-controls > * { min-width: 0; }
+.bulk-controls .rarity-filters { grid-column: 1 / -1; }
 .fuse-controls .rarity-filters { margin: 0; }
 .fuse-target { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin: 1rem 0; font-size: .875rem; }
 .fuse-target .icon { width: 1rem; height: 1rem; color: var(--accent); }
@@ -725,8 +731,13 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
 .bulk-field { display: flex; flex-direction: column; gap: .2rem; font-size: .75rem; color: var(--secondary); }
 .bulk-field input, .bulk-field select { min-height: 2.75rem; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--paper); color: var(--ink); font: inherit; font-size: .9375rem; }
 .bulk-field input { width: 5.5rem; }
-.bulk-check { display: flex; align-items: center; gap: .4rem; font-size: .8125rem; }
-.bulk-check input { width: 1.15rem; height: 1.15rem; }
+.check-control { position: relative; display: flex; align-items: center; gap: .5rem; min-height: 2.75rem; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--paper); color: var(--ink); font-size: .875rem; }
+.check-control input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
+.check-control .check-box { display: grid; width: 1.15rem; height: 1.15rem; flex: 0 0 auto; place-items: center; border: 1px solid var(--line); border-radius: .35rem; background: var(--paper); color: transparent; }
+.check-control input:checked ~ .check-box { border-color: var(--accent); background: var(--accent); color: #fff; }
+.check-control input:focus-visible ~ .check-box { outline: 3px solid var(--focus); outline-offset: 3px; }
+.check-control .check-box .icon { width: .8rem; height: .8rem; }
+.check-state { min-width: 0; word-break: keep-all; overflow-wrap: anywhere; }
 
 /* ---------- 소모 확인 시트 ---------- */
 .confirm-dialog { position: fixed; inset: 0; width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; padding: 1.5rem; border: 0; background: transparent; color: var(--ink); overflow-y: auto; overscroll-behavior: contain; }
@@ -738,6 +749,7 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
 .confirm-list { display: flex; flex-direction: column; gap: .25rem; margin: 0; padding: 0; list-style: none; }
 .confirm-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-size: .875rem; }
 .confirm-list li strong { color: var(--accent-dark); font-variant-numeric: tabular-nums; }
+.confirm-list li > span { min-width: 0; word-break: keep-all; overflow-wrap: anywhere; }
 .confirm-list.is-targets { max-height: 12rem; overflow-y: auto; padding-top: .6rem; border-top: 1px solid var(--line); }
 .confirm-list.is-targets span { min-width: 0; overflow-wrap: anywhere; color: var(--secondary); }
 .confirm-note { font-size: .75rem; line-height: 1.7; color: var(--secondary); }

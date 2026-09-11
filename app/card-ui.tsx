@@ -40,7 +40,7 @@ export function Brand({ children }: { children?: ReactNode }) {
   return <><span className="brand-symbol" aria-hidden="true"><i /><i /><i /><i /></span><span>limketmon<span className="brand-period">.</span></span>{children}</>;
 }
 
-type CardArtworkProps = { card: Card; quantity?: number; materialCount?: number; enhanceLevel?: number; priority?: boolean };
+type CardArtworkProps = { card: Card; quantity?: number; materialCount?: number; enhanceLevel?: number; priority?: boolean; unowned?: boolean };
 
 export type MaterialSource = { materialCount?: number; quantity?: number; baseCardId?: string; cardId?: string };
 
@@ -102,11 +102,11 @@ export function CardBadges({ card, progress, className = '' }: { card: Card; pro
  * Grid/list preview: plain DOM, no springs, pointer tracking or foil layers. The archive renders
  * one per card, so a per-card spring + two motion layers was the biggest idle cost on the page.
  */
-export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantity = 0, materialCount, enhanceLevel = 0, priority = false }: CardArtworkProps) {
+export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantity = 0, materialCount, enhanceLevel = 0, priority = false, unowned = false }: CardArtworkProps) {
   const thumbKey = card.imageKey ? `${card.imageKey.replace(/\.[^.]+$/, "")}.webp` : "";
   const materials = materialCount ?? enhanceMaterials(quantity);
   return (
-    <div className={`card-art rarity-${card.rarity}`}>
+    <div className={`card-art rarity-${card.rarity}${unowned ? ' is-unowned' : ''}`}>
       <img src={`/cards/thumbs/${thumbKey}`} alt={cardTitle(card)} loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : undefined} decoding="async" draggable={false} />
       <div className="card-shade" />
       <span className="card-edition">LIMKETMON <span>ORIGINALS</span></span>
@@ -120,7 +120,7 @@ export const StaticCardArtwork = memo(function StaticCardArtwork({ card, quantit
 });
 
 /** Tilt + foil: only the one or two cards the player is actively looking at (detail, pull reveal). */
-function InteractiveCardArtwork({ card, quantity = 0, materialCount, enhanceLevel = 0, priority = false }: CardArtworkProps) {
+function InteractiveCardArtwork({ card, quantity = 0, materialCount, enhanceLevel = 0, priority = false, unowned = false }: CardArtworkProps) {
   const reduced = useReducedMotion();
   const materials = materialCount ?? enhanceMaterials(quantity);
   const rx = useSpring(0, gentleSpring);
@@ -146,7 +146,7 @@ function InteractiveCardArtwork({ card, quantity = 0, materialCount, enhanceLeve
 
   return (
     <motion.div
-      className={`card-art rarity-${card.rarity}`}
+      className={`card-art rarity-${card.rarity}${unowned ? ' is-unowned' : ''}`}
       style={{ rotateX: rx, rotateY: ry, transformPerspective: 900 }}
       onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); move(event); }} onPointerMove={move} onPointerLeave={reset} onPointerUp={reset} onPointerCancel={reset}
     >
@@ -168,9 +168,9 @@ export function CardArtwork({ interactive = false, ...props }: CardArtworkProps 
   return interactive ? <InteractiveCardArtwork {...props} /> : <StaticCardArtwork {...props} />;
 }
 
-export function CardButton({ card, quantity = 0, materialCount, enhanceLevel = 0, onClick, priority = false }: { card: Card; quantity?: number; materialCount?: number; enhanceLevel?: number; onClick: () => void; priority?: boolean }) {
+export function CardButton({ card, quantity = 0, materialCount, enhanceLevel = 0, unowned = false, onClick, priority = false }: { card: Card; quantity?: number; materialCount?: number; enhanceLevel?: number; unowned?: boolean; onClick: () => void; priority?: boolean }) {
   const materials = materialCount ?? enhanceMaterials(quantity);
-  return <button type="button" className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장 · 강화 재료 ${materials}장` : '카드 미리보기'}`}><StaticCardArtwork card={card} quantity={quantity} materialCount={materials} enhanceLevel={enhanceLevel} priority={priority} /></button>;
+  return <button type="button" className="card-button" onClick={onClick} aria-label={`${cardTitle(card)}, ${card.rarity}, ${quantity ? `보유 ${quantity}장 · 강화 재료 ${materials}장` : '카드 미리보기'}`}><StaticCardArtwork card={card} quantity={quantity} materialCount={materials} enhanceLevel={enhanceLevel} priority={priority} unowned={unowned} /></button>;
 }
 
 export function CardBack({ count = 1 }: { count?: number }) {
@@ -282,7 +282,7 @@ export function describeOps(ops: readonly AbilityOp[]): string {
     .join(' · ');
 }
 
-export function CardDetail({ card, quantity, materialCount, enhanceLevel = 0, obtainedAt, progress, growth, onEnhance, enhancing, onClose }: { card: Card; quantity: number; materialCount?: number; enhanceLevel?: number; obtainedAt?: string; progress?: CardProgress; growth?: ReactNode; onEnhance?: (cardId: string) => Promise<void>; enhancing?: boolean; onClose: () => void }) {
+export function CardDetail({ card, quantity, materialCount, enhanceLevel = 0, unowned = false, obtainedAt, progress, growth, onEnhance, enhancing, onClose }: { card: Card; quantity: number; materialCount?: number; enhanceLevel?: number; unowned?: boolean; obtainedAt?: string; progress?: CardProgress; growth?: ReactNode; onEnhance?: (cardId: string) => Promise<void>; enhancing?: boolean; onClose: () => void }) {
   const reduced = useReducedMotion();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -314,7 +314,7 @@ export function CardDetail({ card, quantity, materialCount, enhanceLevel = 0, ob
         <button className="sheet-handle" aria-label="아래로 끌어 닫기, 또는 눌러 닫기" onPointerDown={(event) => { dragged.current = false; drag.start(event); }} onClick={(event) => { if (!dragged.current || event.detail === 0) onClose(); }}><span /></button>
         <div className="detail-scroll">
         
-        <div className="detail-art"><CardArtwork card={card} quantity={quantity} materialCount={materials} enhanceLevel={enhanceLevel} priority interactive /><p><Icon name="hand" />카드에 손을 대고 빛을 움직여 보세요</p></div>
+        <div className="detail-art"><CardArtwork card={card} quantity={quantity} materialCount={materials} enhanceLevel={enhanceLevel} priority interactive unowned={unowned} /><p><Icon name="hand" />카드에 손을 대고 빛을 움직여 보세요</p></div>
           <div className="detail-copy"><div className="detail-meta"><span className={`rarity-tag rarity-${card.rarity}`}>{card.rarity}</span>{isTranscended(card.rarity, progress?.traits) && <span className="transcend-tag"><Icon name="sparkle" />초월</span>}<span>NO. {String(card.version).padStart(3, '0')} / ORIGINALS</span></div>
           <h2 id={titleId}>{cardTitle(card)}</h2><p className="detail-name">{card.name}</p>
           <CardBadges card={card} progress={progress} className="detail-badges" />

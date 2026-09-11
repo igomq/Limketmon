@@ -821,7 +821,7 @@ function ResultDialog({ outcome, round, endReason, summary, settling, settleFail
   return (
     <motion.dialog
       ref={dialog}
-      className="detail-dialog"
+      className="detail-dialog result-dialog"
       aria-labelledby="battle-result-title"
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}

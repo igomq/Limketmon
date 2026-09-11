@@ -164,10 +164,10 @@ test('transcend splits one copy, preserves all progress, and moves a singleton d
     db.prepare('INSERT INTO deck_cards VALUES (?,0,?)').bind(u,id).run();
     const result=await trans(u,id); assert.ok(result.cardId);
     const output=row(u,result.cardId); assert.equal(output.rarity_override,'UR'); assert.equal(output.enhance_level,5); assert.equal(output.quantity,1);
-    assert.deepEqual(JSON.parse(output.traits),[{...trait(),transcended:true},traits[1]]); assert.equal(state(u).twin_proof,4);
+    assert.deepEqual(JSON.parse(output.traits),[{...trait(),transcended:true,spentProof:quantity===1?400:0,...(quantity>1?{refundEstimated:false}:{})},{...traits[1],spentProof:quantity===1?190:0,...(quantity>1?{refundEstimated:false}:{})}]); assert.equal(state(u).twin_proof,4);
     assert.equal(row(u,id)?.quantity ?? 0,quantity-1);
     assert.equal(db.prepare('SELECT card_id FROM deck_cards WHERE deck_id=?').bind(u).first().card_id,quantity===1?result.cardId:id);
-    if(quantity>1) assert.deepEqual(JSON.parse(row(u,id).traits),traits);
+    if(quantity>1) assert.deepEqual(JSON.parse(row(u,id).traits),[{...traits[0],spentProof:400},{...traits[1],spentProof:190}]);
   }
 });
 
@@ -232,7 +232,7 @@ test('private coupon stays disabled without a secret and repeats with one, leaki
     env.PRIVATE_CARD_COUPON='  internal-fixture-coupon  ';
     for(const code of ['INTERNAL-FIXTURE-COUPON','internal-fixture-coupon',' internal-fixture-coupon ']){
       const receipt=await game.redeemCoupon(u,code);
-      assert.deepEqual(receipt.granted,{credits:0,low:0,sr:0,ssr:0});
+      assert.deepEqual(receipt.granted,{credits:0,low:0,sr:0,ssr:0,cards:game.cards.length*100,cardTypes:game.cards.length,copiesPerCard:100});
       assert.ok(!JSON.stringify(receipt).includes('fixture'));
     }
   } finally { delete env.PRIVATE_CARD_COUPON; }

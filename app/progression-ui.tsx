@@ -28,14 +28,22 @@ export type Materials = Snapshot['materials'];
 /** The exact owned copies a destructive command may spend. */
 export type SpentCards = Array<{ cardId: string; quantity: number }>;
 /** `preview:true` answer from POST /api/progression: what WOULD be spent, without writing. */
-export type ProgressionPreview = { cards: SpentCards; proof: number; minFragments: number; warning: string };
+export type ProgressionPreview = {
+  cards: SpentCards;
+  proof: number;
+  minFragments: number;
+  warning: string;
+  /** Opaque guard: the row's raw traits string the preview was made from. Commit must echo it. */
+  expectedTraits?: string;
+};
 export type ProgressionRequest =
   | { action: 'dismantle'; cards: SpentCards }
   | { action: 'bulk-dismantle'; rarity: Rarity; maxEnhance: number; includeBase: boolean }
   | { action: 'trait'; cardId: string; traitId: TraitId }
   | { action: 'craft-twin' }
   | { action: 'transcend'; cardId: string; traitId: TraitId }
-  | { action: 'fuse'; cards: SpentCards; count: 2 | 3 };
+  | { action: 'fuse'; cards: SpentCards; count: 2 | 3 }
+  | { action: 'remove-trait'; cardId: string; traitId: TraitId; expectedTraits?: string };
 export type ProgressionReply = { message: string; preview?: ProgressionPreview };
 /** Owner of the request state: posts to /api/progression and refreshes the snapshot. Throws on refusal. */
 export type RunProgression = (body: ProgressionRequest, options?: { preview?: boolean }) => Promise<ProgressionReply>;
@@ -54,7 +62,7 @@ const TRAIT_HINT: Record<string, string> = {
 const percent = (value: number) => `${Math.round(value * 1000) / 10}%`;
 const fragmentText = (rarity: Rarity) => {
   const chance = fragmentChance(rarity);
-  return chance >= 1 ? '파편 확정' : `파편 ${percent(chance)}`;
+  return chance >= 1 ? '쌍둥이 임신의 증거 파편 확정' : `쌍둥이 임신의 증거 파편 ${percent(chance)}`;
 };
 const nextTrait = (trait: Trait): Trait => ({ ...trait, level: Math.min(MAX_TRAIT_LEVEL, trait.level + 1) });
 
@@ -90,7 +98,7 @@ export function GrowthView({ user, snapshot, run, busy, onOpenCard }: {
     setNote(null);
     try {
       const reply = await run({ action: 'craft-twin' });
-      report(reply.message || '쌍둥이 증거를 만들었어요.');
+      report(reply.message || '쌍둥이 임신의 증거를 만들었어요.');
       setCrafting(false);
     } catch (error) {
       fail(error);
@@ -103,7 +111,7 @@ export function GrowthView({ user, snapshot, run, busy, onOpenCard }: {
     return (
       <section className="growth-view" aria-labelledby="growth-title">
         <header className="section-head">
-          <div><p className="eyebrow">CARD GROWTH</p><h1 id="growth-title">카드 성장.</h1><p>증거와 파편으로 특성을 열고, 합성과 초월로 등급을 올립니다.</p></div>
+          <div><p className="eyebrow">CARD GROWTH</p><h1 id="growth-title">카드 성장.</h1><p>임신의 증거와 쌍둥이 임신의 증거 파편으로 특성을 열고, 합성과 초월로 등급을 올립니다.</p></div>
         </header>
         <section className="welcome-strip">
           <span><Icon name="sparkle" /><strong>성장은 로그인 후에.</strong><span>보유 카드의 특성과 분해 기록이 내 계정에 남아요.</span></span>
@@ -119,7 +127,7 @@ export function GrowthView({ user, snapshot, run, busy, onOpenCard }: {
         <div>
           <p className="eyebrow">CARD GROWTH</p>
           <h1 id="growth-title">카드 성장.</h1>
-          <p>같은 카드를 갈아 증거를 모으고, 특성·합성·초월로 카드를 키웁니다.</p>
+          <p>같은 카드를 갈아 임신의 증거를 모으고, 특성·합성·초월로 카드를 키웁니다.</p>
         </div>
       </header>
 
@@ -128,11 +136,11 @@ export function GrowthView({ user, snapshot, run, busy, onOpenCard }: {
         <span className="wallet-chip"><small>일반 뽑기권</small><strong>{snapshot.credits.toLocaleString('ko-KR')}</strong></span>
         <span className="wallet-chip"><small>SR 뽑기권</small><strong>{snapshot.tickets.sr.toLocaleString('ko-KR')}</strong></span>
         <span className="wallet-chip"><small>SSR 뽑기권</small><strong>{snapshot.tickets.ssr.toLocaleString('ko-KR')}</strong></span>
-        <span className="wallet-chip is-proof"><small>증거</small><strong>{materials.proof.toLocaleString('ko-KR')}</strong></span>
-        <span className="wallet-chip is-fragment"><small>파편</small><strong>{materials.fragments.toLocaleString('ko-KR')}</strong></span>
-        <span className="wallet-chip is-twin"><small>쌍둥이 증거</small><strong>{materials.twinProof.toLocaleString('ko-KR')}</strong></span>
+        <span className="wallet-chip is-proof"><small>임신의 증거</small><strong>{materials.proof.toLocaleString('ko-KR')}</strong></span>
+        <span className="wallet-chip is-fragment"><small>쌍둥이 임신의 증거 파편</small><strong>{materials.fragments.toLocaleString('ko-KR')}</strong></span>
+        <span className="wallet-chip is-twin"><small>쌍둥이 임신의 증거</small><strong>{materials.twinProof.toLocaleString('ko-KR')}</strong></span>
         <button className="wallet-chip is-action" disabled={working || materials.fragments < 5} onClick={() => { setNote(null); setCrafting(true); }}>
-          <small>파편 5개 → 쌍둥이 증거</small><strong>{materials.fragments >= 5 ? '합성하기' : `파편 ${5 - materials.fragments}개 부족`}</strong>
+          <small>쌍둥이 임신의 증거 파편 5개 → 쌍둥이 임신의 증거</small><strong>{materials.fragments >= 5 ? '합성하기' : `쌍둥이 임신의 증거 파편 ${5 - materials.fragments}개 부족`}</strong>
         </button>
       </div>
 
@@ -146,7 +154,7 @@ export function GrowthView({ user, snapshot, run, busy, onOpenCard }: {
 
       {tab === 'cards' && (
         <>
-          <div className="growth-sort" role="group" aria-label="정렬">
+          <div className="sort-toggle growth-sort" role="group" aria-label="정렬">
             <button aria-pressed={highFirst} onClick={() => setHighFirst(true)}>등급 내림</button>
             <button aria-pressed={!highFirst} onClick={() => setHighFirst(false)}>등급 오름</button>
           </div>
@@ -181,17 +189,17 @@ export function GrowthView({ user, snapshot, run, busy, onOpenCard }: {
         {crafting && (
           <ConfirmSheet
             key="craft-twin"
-            title="파편 5개를 합성할까요?"
-            confirmLabel="쌍둥이 증거 만들기"
+            title="쌍둥이 임신의 증거 파편 5개를 합성할까요?"
+            confirmLabel="쌍둥이 임신의 증거 만들기"
             busy={working}
             onConfirm={() => void craftTwin()}
             onClose={() => setCrafting(false)}
           >
             <ul className="confirm-list">
-              <li><span>파편</span><strong>-5</strong></li>
+              <li><span>쌍둥이 임신의 증거 파편</span><strong>-5</strong></li>
               <li><span>쌍둥이 임신의 증거</span><strong>+1</strong></li>
             </ul>
-            <p className="confirm-note">쌍둥이 증거는 한 장을 초월할 때 1개 씁니다.</p>
+            <p className="confirm-note">쌍둥이 임신의 증거는 한 장을 초월할 때 1개 씁니다.</p>
           </ConfirmSheet>
         )}
       </AnimatePresence>
@@ -454,12 +462,16 @@ function BulkDismantlePanel({ rows, run, busy, onPending, onNote }: {
             {Array.from({ length: 16 }, (_, level) => <option key={level} value={level}>+{level} 이하</option>)}
           </select>
         </label>
-        <label className="bulk-check">
-          <input type="checkbox" checked={includeBase} onChange={(event) => setIncludeBase(event.target.checked)} />
-          <span>본체(남은 1장)까지 포함</span>
+        <label className="bulk-field bulk-check">
+          <span>본체 포함</span>
+          <span className="check-control">
+            <input type="checkbox" checked={includeBase} onChange={(event) => setIncludeBase(event.target.checked)} />
+            <span className="check-box" aria-hidden="true"><Icon name="check" /></span>
+            <span className="check-state" aria-hidden="true">{includeBase ? '본체 포함' : '본체 미포함'}</span>
+          </span>
         </label>
       </div>
-      <p className="deck-note">기본값은 중복분만 분해합니다. 등급 1장당 증거 {dismantleReward(rarity)}개 · {fragmentText(rarity)}.</p>
+      <p className="deck-note">기본값은 중복분만 분해합니다. 등급 1장당 임신의 증거 {dismantleReward(rarity)}개 · {fragmentText(rarity)}.</p>
       <div className="sticky-bar">
         <span className="deck-save-state"><Icon name="sparkle" />{rarity} · +{maxEnhance} 이하{includeBase ? ' · 본체 포함' : ' · 중복만'}</span>
         <button className="btn btn-primary" disabled={busy} onClick={() => void loadPreview()}>대상 미리보기</button>
@@ -476,8 +488,8 @@ function BulkDismantlePanel({ rows, run, busy, onPending, onNote }: {
             onClose={() => { setConfirming(false); setPreview(null); }}
           >
             <ul className="confirm-list">
-              <li><span>증거</span><strong>+{preview.proof}개</strong></li>
-              <li><span>파편</span><strong>최소 +{preview.minFragments}개</strong></li>
+              <li><span>임신의 증거</span><strong>+{preview.proof}개</strong></li>
+              <li><span>쌍둥이 임신의 증거 파편</span><strong>최소 +{preview.minFragments}개</strong></li>
             </ul>
             <ul className="confirm-list is-targets">
               {preview.cards.map((entry) => <li key={entry.cardId}><span>{names.get(entry.cardId) ?? entry.cardId}</span><strong>{entry.quantity}장</strong></li>)}
@@ -500,6 +512,8 @@ export function TraitPanel({ card, row, materials, run, busy }: {
 }) {
   const [pending, setPending] = useState<string | null>(null);
   const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  /** The server's own removal preview, held so the confirm sheet shows no guessed refund. */
+  const [removal, setRemoval] = useState<{ traitId: TraitId; preview: ProgressionPreview } | null>(null);
   const working = busy || pending !== null;
   const openSlots = Math.max(0, 2 - row.traits.length);
   const available = TRAIT_IDS.filter((id) => !row.traits.some((trait) => trait.id === id));
@@ -516,6 +530,44 @@ export function TraitPanel({ card, row, materials, run, busy }: {
       setPending(null);
     }
   }
+
+  /** Removal preview: same server envelope as dismantle, and the exact refund comes back in it. */
+  async function loadRemoval(traitId: TraitId) {
+    setPending(traitId);
+    setNote(null);
+    try {
+      const reply = await run({ action: 'remove-trait', cardId: row.cardId, traitId }, { preview: true });
+      if (!reply.preview) throw new Error('제거 정보를 확인하지 못했어요. 잠시 후 다시 시도해주세요.');
+      setRemoval({ traitId, preview: reply.preview });
+    } catch (error) {
+      setNote({ text: error instanceof Error ? error.message : '연결을 확인한 뒤 다시 시도해주세요.', error: true });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function removeTrait() {
+    if (!removal) return;
+    setPending(removal.traitId);
+    setNote(null);
+    try {
+      const reply = await run({
+        action: 'remove-trait',
+        cardId: row.cardId,
+        traitId: removal.traitId,
+        expectedTraits: removal.preview.expectedTraits
+      });
+      setNote({ text: reply.message || `${TRAIT_LABEL[removal.traitId]} 특성을 제거했어요.`, error: false });
+    } catch (error) {
+      // A stale preview is refused without credit: show why and make the player re-read the card.
+      setNote({ text: error instanceof Error ? error.message : '연결을 확인한 뒤 다시 시도해주세요.', error: true });
+    } finally {
+      setRemoval(null);
+      setPending(null);
+    }
+  }
+
+  const removalTrait = removal ? row.traits.find((trait) => trait.id === removal.traitId) : undefined;
 
   return (
     <section className="trait-panel" aria-labelledby={`trait-title-${row.cardId}`}>
@@ -541,14 +593,22 @@ export function TraitPanel({ card, row, materials, run, busy }: {
                 <p className="trait-next">
                   {cap
                     ? '최대 레벨입니다. 초월하면 효과가 1.75배가 됩니다.'
-                    : <>다음 +{trait.level + 1} · 증거 <strong>{cost}</strong>개 · 효과 {percent(traitValue(nextTrait(trait)))}{jump ? ' · 5레벨 급등' : ''}</>}
+                    : <>다음 +{trait.level + 1} · 임신의 증거 <strong>{cost}</strong>개 · 효과 {percent(traitValue(nextTrait(trait)))}{jump ? ' · 5레벨 급등' : ''}</>}
                 </p>
                 <button
                   className="btn btn-dark"
                   disabled={working || cap || short}
                   onClick={() => void apply(trait.id)}
                 >
-                  {cap ? '최대 특성' : short ? `증거 ${cost - materials.proof}개 부족` : `+${trait.level + 1} 강화 · 증거 ${cost}개`}
+                  {cap ? '최대 특성' : short ? `임신의 증거 ${cost - materials.proof}개 부족` : `+${trait.level + 1} 강화 · 임신의 증거 ${cost}개`}
+                </button>
+                <button
+                  className="text-button"
+                  disabled={working}
+                  aria-label={`${TRAIT_LABEL[trait.id]} 특성 제거`}
+                  onClick={() => void loadRemoval(trait.id)}
+                >
+                  {pending === trait.id ? '확인 중…' : '특성 제거'}
                 </button>
               </li>
             );
@@ -557,7 +617,7 @@ export function TraitPanel({ card, row, materials, run, busy }: {
       ) : null}
       {openSlots > 0 ? (
         <div className="trait-open">
-          <p className="trait-open-label">특성 선택 <span>{openSlots}칸 남음</span> · 첫 +1 비용 증거 {traitCost(card.rarity, 0)}개</p>
+          <p className="trait-open-label">특성 선택 <span>{openSlots}칸 남음</span> · 첫 +1 비용 임신의 증거 {traitCost(card.rarity, 0)}개</p>
           <ul className="trait-choices">
             {available.map((id) => (
               <li key={id}>
@@ -571,6 +631,34 @@ export function TraitPanel({ card, row, materials, run, busy }: {
         </div>
       ) : null}
       {note && <p className={`enhance-note ${note.error ? 'is-error' : ''}`} role={note.error ? 'alert' : 'status'}>{note.text}</p>}
+
+      <AnimatePresence>
+        {removal && (
+          <ConfirmSheet
+            key="remove-trait"
+            title={`${TRAIT_LABEL[removal.traitId]} 특성을 제거할까요?`}
+            confirmLabel="특성 제거"
+            busy={working}
+            onConfirm={() => void removeTrait()}
+            onClose={() => setRemoval(null)}
+          >
+            <ul className="confirm-list">
+              <li>
+                <span>제거할 특성</span>
+                <strong>{TRAIT_LABEL[removal.traitId]} +{removalTrait?.level ?? 0}{removalTrait?.transcended ? ' · 초월' : ''}</strong>
+              </li>
+              {removalTrait && <li><span>사라지는 효과</span><strong>{percent(traitValue(removalTrait))}</strong></li>}
+              <li><span>임신의 증거 환급 (지출의 50% 내림)</span><strong>+{removal.preview.proof}개</strong></li>
+              <li><span>특성 슬롯</span><strong>1칸 회복</strong></li>
+            </ul>
+            <p className="confirm-note">
+              선택한 특성의 효과{removalTrait?.transcended ? '와 초월 보너스' : ''}만 사라집니다. 카드 등급, 강화 단계, 다른 특성과 카드 수량은 그대로 남고,
+              쌍둥이 임신의 증거와 파편은 돌려받지 않아요.
+            </p>
+            {removal.preview.warning && <p className="confirm-note">{removal.preview.warning}</p>}
+          </ConfirmSheet>
+        )}
+      </AnimatePresence>
     </section>
   );
 }
@@ -625,7 +713,7 @@ export function DismantlePanel({ card, row, run, busy }: {
     <section className="dismantle-panel" aria-labelledby={`dismantle-title-${row.cardId}`}>
       <span className="eyebrow">DISMANTLE</span>
       <h3 id={`dismantle-title-${row.cardId}`}>분해</h3>
-      <p className="dismantle-intro">보유 {row.quantity}장 · 1장당 증거 {dismantleReward(card.rarity)}개 · {fragmentText(card.rarity)}. 덱에 쓰는 마지막 1장은 보호됩니다.</p>
+      <p className="dismantle-intro">보유 {row.quantity}장 · 1장당 임신의 증거 {dismantleReward(card.rarity)}개 · {fragmentText(card.rarity)}. 덱에 쓰는 마지막 1장은 보호됩니다.</p>
       <div className="dismantle-controls">
         <label className="bulk-field">
           <span>분해 수량</span>
@@ -652,8 +740,8 @@ export function DismantlePanel({ card, row, run, busy }: {
               {preview.cards.map((entry) => <li key={entry.cardId}><span>{cardTitle(card)}</span><strong>{entry.quantity}장</strong></li>)}
             </ul>
             <ul className="confirm-list">
-              <li><span>증거</span><strong>+{preview.proof}개</strong></li>
-              <li><span>파편</span><strong>최소 +{preview.minFragments}개</strong></li>
+              <li><span>임신의 증거</span><strong>+{preview.proof}개</strong></li>
+              <li><span>쌍둥이 임신의 증거 파편</span><strong>최소 +{preview.minFragments}개</strong></li>
             </ul>
             {preview.warning && <p className="confirm-note">{preview.warning}</p>}
           </ConfirmSheet>
@@ -707,7 +795,7 @@ export function TranscendPanel({ card, row, materials, run, busy }: {
         <li data-met={!capped}><Icon name={capped ? 'clock' : 'check'} />등급 여유<span>{capped ? 'XR은 더 올릴 수 없어요' : `${card.rarity} → ${target}`}</span></li>
         <li data-met={enhanced}><Icon name={enhanced ? 'check' : 'clock'} />강화 +5 이상<span>현재 +{row.enhanceLevel}</span></li>
         <li data-met={eligible.length > 0}><Icon name={eligible.length ? 'check' : 'clock'} />비초월 특성 +10<span>{eligible.length ? eligible.map((trait) => TRAIT_LABEL[trait.id]).join(' · ') : '아직 +10 특성이 없어요'}</span></li>
-        <li data-met={affordable}><Icon name={affordable ? 'check' : 'clock'} />쌍둥이 증거 1개<span>보유 {materials.twinProof}개</span></li>
+        <li data-met={affordable}><Icon name={affordable ? 'check' : 'clock'} />쌍둥이 임신의 증거 1개<span>보유 {materials.twinProof}개</span></li>
       </ul>
       {eligible.length > 0 ? (
         <div className="sort-toggle" role="group" aria-label="초월할 특성">
@@ -717,7 +805,7 @@ export function TranscendPanel({ card, row, materials, run, busy }: {
         </div>
       ) : null}
       <button className="btn btn-primary" disabled={working || !ready} onClick={() => setConfirming(true)}>
-        {capped ? '초월 완료' : !enhanced ? '강화 +5 필요' : !chosen ? '특성 +10 필요' : !affordable ? '쌍둥이 증거 1개 필요' : '초월 확인'}
+        {capped ? '초월 완료' : !enhanced ? '강화 +5 필요' : !chosen ? '특성 +10 필요' : !affordable ? '쌍둥이 임신의 증거 1개 필요' : '초월 확인'}
       </button>
       {note && <p className={`enhance-note ${note.error ? 'is-error' : ''}`} role={note.error ? 'alert' : 'status'}>{note.text}</p>}
 
