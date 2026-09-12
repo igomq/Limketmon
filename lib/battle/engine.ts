@@ -11,7 +11,7 @@
 // Damage formula (one hit):
 //   attackValue = basic attack ? effectiveStat(attacker,'atk') : op.power
 //   boost       = element_boost modifier matches attacker element ? 1 + bonus : 1
-//   base        = max(1, attackValue * boost - effectiveStat(defender,'def') * 0.45)
+//   base        = max(1, attackValue * boost - effectiveStat(defender,'def') * 0.55)
 //   variance    = 0.9 + draw1 * 0.2
 //   element     = ring x1.25 (beats) / x0.8 (beaten by) / x1.0
 //   crit        = draw2 * 100 < attacker.crit ? x1.6 : x1.0
@@ -64,7 +64,7 @@ const MAX_OP_DEPTH = 4;
 const CRIT_MULT = 1.6;
 const RING_STRONG = 1.25;
 const RING_WEAK = 0.8;
-const DEF_FACTOR = 0.45;
+const DEF_FACTOR = 0.55;
 /** The DSL's shield op has no duration field; it covers the bearer's next two turns. */
 const SHIELD_TURNS = 2;
 

@@ -24,7 +24,8 @@ export const MODE_CREDITS_MULTIPLIER: Record<BattleMode, number> = {
 
 interface ModeTuning {
   hp: number;
-  stat: number;
+  atk: number;
+  def: number;
   heal: number;
   appetite: number;
   ruthless: boolean;
@@ -32,10 +33,10 @@ interface ModeTuning {
 
 /** Mode difficulty rides on top of the base ladder: scaling HP, ATK/DEF, and AI aggression. */
 const MODE_TUNING: Record<BattleMode, ModeTuning> = {
-  normal: { hp: 1, stat: 1.06, heal: 0.95, appetite: 1.1, ruthless: false },
-  hard: { hp: 1.52, stat: 1.52, heal: 0.88, appetite: 1.18, ruthless: true },
-  chaos: { hp: 1.88, stat: 1.88, heal: 0.78, appetite: 1.28, ruthless: true },
-  extreme: { hp: 2.75, stat: 2.75, heal: 0.62, appetite: 1.5, ruthless: true }
+  normal: { hp: 1.12, atk: 1.06, def: 1.18, heal: 0.95, appetite: 1.1, ruthless: false },
+  hard: { hp: 1.85, atk: 1.4, def: 1.72, heal: 0.88, appetite: 1.18, ruthless: true },
+  chaos: { hp: 2.4, atk: 1.55, def: 2.15, heal: 0.78, appetite: 1.28, ruthless: true },
+  extreme: { hp: 3.25, atk: 2.2, def: 3.0, heal: 0.62, appetite: 1.5, ruthless: true }
 };
 
 /**
@@ -62,8 +63,8 @@ const MODE_LOADOUTS: Partial<Record<BattleMode, Record<string, OpponentLoadout[]
     rookie: [unit('imsingyu-v010', 1), unit('imsingyu-v022', 1), unit('imsingyu-v004', 2)],
     regular: [unit('imsingyu-v016', 2), unit('imsingyu-v009', 2), unit('imsingyu-v014', 3)],
     veteran: [unit('imsingyu-v018', 3), unit('imsingyu-v025', 3), unit('imsingyu-v039', 3)],
-    ace: [unit('imsingyu-v020', 4, 'SR', [trait('damage', 4)]), unit('imsingyu-v045', 4), unit('imsingyu-v008', 4)],
-    boss: [unit('imsingyu-v033', 5, 'UR', [trait('damage', 5)]), unit('imsingyu-v041', 5), unit('imsingyu-v006', 4)]
+    ace: [unit('imsingyu-v020', 3), unit('imsingyu-v045', 3), unit('imsingyu-v008', 3)],
+    boss: [unit('imsingyu-v006', 3), unit('imsingyu-v041', 3), unit('imsingyu-v045', 3)]
   },
   chaos: {
     rookie: [unit('imsingyu-v021', 3), unit('imsingyu-v034', 3), unit('imsingyu-v044', 3)],
@@ -158,7 +159,8 @@ export function opponentById(id: string, mode: BattleMode = 'normal'): Opponent 
     cards: loadout ? loadout.map((entry) => entry.cardId) : base.cards,
     loadout,
     hpScale: base.hpScale * tuning.hp * delta,
-    statScale: tuning.stat * delta,
+    statScale: tuning.atk * delta,
+    defScale: tuning.def * delta,
     profile: {
       ...base.profile,
       healBelow: base.profile.healBelow * tuning.heal,

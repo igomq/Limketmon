@@ -49,7 +49,7 @@ test('stats: rarity-normalized derivation matches the documented power anchors',
 });
 
 test('stats: ability identity is stable and keeps the curated Korean copy', () => {
-  assert.equal(STAT_RULESET, 4);
+  assert.equal(STAT_RULESET, 5);
   assert.equal(ABILITY_RULESET, 3);
   for (const card of cards) {
     const { ability } = battleStats(card);
@@ -159,7 +159,7 @@ test('opponents: five distinct ladders over real manifest cards', () => {
   assert.ok(rookie.cards.every((cardId) => ['N', 'R'].includes(cardById(cardId).rarity)));
   assert.equal(boss.profile.skillAppetite, Math.max(...OPPONENTS.map((opponent) => opponent.profile.skillAppetite)));
   assert.equal(baseBoss.hpScale, Math.max(...OPPONENTS.map((opponent) => opponent.hpScale)));
-  assert.ok(Math.abs(boss.hpScale - baseBoss.hpScale * 1.2) < 1e-9);
+  assert.ok(Math.abs(boss.hpScale - baseBoss.hpScale * 1.12 * 1.2) < 1e-9);
   assert.equal(boss.reward.credits, Math.max(...OPPONENTS.map((opponent) => opponent.reward.credits)));
   const ranks: Record<Card['rarity'], number> = { N: 0, R: 1, SR: 2, SSR: 3, UR: 4, XR: 5 };
   const bossRanks = boss.cards.map((cardId) => ranks[cardById(cardId).rarity]);

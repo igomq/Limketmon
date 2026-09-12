@@ -127,11 +127,12 @@ export function opponentTeam(opponentId: string, mode: BattleMode = 'normal'): C
       }
       : undefined;
     const seed = combatantSeed(grown?.cardId ?? cardId, opponent.hpScale, grown?.enhance ?? 0, progress);
-    if (statScale === 1) return seed;
+    const defScale = opponent.defScale ?? statScale;
+    if (statScale === 1 && defScale === 1) return seed;
     return {
       ...seed,
       atk: Math.max(1, Math.round(seed.atk * statScale)),
-      def: Math.max(1, Math.round(seed.def * statScale))
+      def: Math.max(1, Math.round(seed.def * defScale))
     };
   });
 }

@@ -82,8 +82,10 @@ test('mode difficulty scales HP/ATK/DEF and first-clear credits (1x/2x/4x)', () 
   const chaos = opponentById('boss', 'chaos');
   assert.ok(base);
   assert.ok(Math.abs((base.statScale ?? 0) - 1.06 * 1.2) < 1e-9, 'normal boss is +20% on the 1.06 band');
-  assert.ok(Math.abs((hard!.statScale ?? 0) - 1.52 * 0.92) < 1e-9, 'hard boss is pulled back');
-  assert.ok(Math.abs((chaos!.statScale ?? 0) - 1.88 * 1.02) < 1e-9, 'chaos boss rises less than general stages');
+  assert.ok(Math.abs((hard!.statScale ?? 0) - 1.4 * 0.92) < 1e-9, 'hard boss is pulled back');
+  assert.ok(Math.abs((chaos!.statScale ?? 0) - 1.55 * 1.02) < 1e-9, 'chaos boss rises less than general stages');
+  assert.ok((hard!.statScale ?? 0) < (opponentById('regular', 'chaos')!.statScale ?? 0), 'hard boss ATK scale below chaos regular');
+  assert.ok(!(hard!.loadout ?? []).some((row) => row.rarity === 'UR'), 'hard boss is not a UR wall');
   assert.equal(hard!.reward.credits, base!.reward.credits * 2);
   assert.equal(chaos!.reward.credits, base!.reward.credits * 4);
   assert.ok(hard!.hpScale > base!.hpScale && chaos!.hpScale > hard!.hpScale);

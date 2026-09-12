@@ -12,7 +12,7 @@ import { effectiveStat, livingOf } from './engine.ts';
 
 const RING_STRONG = 1.25;
 const RING_WEAK = 0.8;
-const DEF_FACTOR = 0.45;
+const DEF_FACTOR = 0.55;
 
 export function aiDecision(state: BattleState, profile: AiProfile): Decision {
   const uid = state.activeUid;

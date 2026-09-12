@@ -14,8 +14,9 @@ import { traitValue, type Trait, type TraitId } from '../progression.ts';
  *    instead of re-simulated with rules it was never played under.
  * 6: extreme mode, grown opponent loadouts, retuned hard/chaos scale.
  * 7: hard/chaos difficulty pulled back; chaos ace+ loadouts no longer jump rarity.
+ * 8: durability retune (more HP/DEF, less ATK) and hard-boss below chaos-regular.
  */
-export const BATTLE_RULESET_VERSION = 7;
+export const BATTLE_RULESET_VERSION = 8;
 
 export const BATTLE_MODES = ['normal', 'hard', 'chaos', 'extreme'] as const;
 export type BattleMode = (typeof BATTLE_MODES)[number];
@@ -381,6 +382,8 @@ export interface Opponent {
   hpScale: number;
   /** Multiplier for ATK and DEF. Scales with difficulty mode to keep fights threatening. */
   statScale?: number;
+  /** DEF-only multiplier when durability is split from ATK. Missing means use statScale. */
+  defScale?: number;
   /** When set, opponentTeam builds these grown rows instead of bare catalog cards. */
   loadout?: OpponentLoadout[];
   profile: AiProfile;
