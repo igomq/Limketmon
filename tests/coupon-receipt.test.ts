@@ -44,3 +44,30 @@ test('private test coupon repeats, grants all four tickets, and leaves inventory
   } finally { delete env.PRIVATE_CARD_COUPON; }
   assert.equal(redemptionCount(), 0);
 });
+
+
+test('private each-card coupon grants 200 per catalog card, repeats, preserves growth and rolls back', async () => {
+  const u = 'each-card-user';
+  await game.ensureUser(u, 'each@local.invalid');
+  const first = game.cards[0]!;
+  db.prepare("INSERT INTO inventory (user_id,card_id,quantity,first_obtained_at,enhance_level,traits) VALUES (?,?,7,'before',5,?)")
+    .bind(u, first.id, JSON.stringify([{ id: 'damage', level: 10, transcended: true }])).run();
+  const before = db.prepare('SELECT * FROM inventory WHERE user_id=?').bind(u).first();
+  const code = 'FIXTURE-EACH-CARD';
+  await assert.rejects(game.redeemCoupon(u, code), /유효하지/);
+  env.PRIVATE_EACH_CARD_COUPON = code;
+  try {
+    const receipts = await Promise.all([game.redeemCoupon(u, code.toLowerCase()), game.redeemCoupon(u, ` ${code} `)]);
+    for (const r of receipts) assert.deepEqual(r.granted, { credits: 0, low: 0, sr: 0, ssr: 0, cards: game.cards.length * 200, cardTypes: game.cards.length, copiesPerCard: 200 });
+    const rows = db.prepare('SELECT * FROM inventory WHERE user_id=?').bind(u).all().results;
+    assert.equal(rows.length, game.cards.length);
+    for (const row of rows) assert.equal(row.quantity, row.card_id === first.id ? 407 : 400);
+    const grown = rows.find((row) => row.card_id === first.id);
+    assert.deepEqual({ ...grown, quantity: before.quantity }, { ...before });
+    assert.equal((await game.getSnapshot(u)).credits, 0);
+    db.exec(`CREATE TRIGGER fail_each BEFORE UPDATE ON inventory WHEN NEW.card_id = '${game.cards[1]!.id}' BEGIN SELECT RAISE(ABORT,'fixture failure'); END`);
+    await assert.rejects(game.redeemCoupon(u, code), /fixture failure/);
+    assert.deepEqual(db.prepare('SELECT * FROM inventory WHERE user_id=?').bind(u).all().results, rows);
+    db.exec('DROP TRIGGER fail_each');
+  } finally { delete env.PRIVATE_EACH_CARD_COUPON; }
+});

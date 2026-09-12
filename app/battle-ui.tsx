@@ -7,7 +7,7 @@ import type { Ability, AiProfile, BattleEvent, BattleKind, BattleMode, BattleMod
 import { ELEMENT_LABEL, STATUS_LABEL } from '../lib/battle/types';
 import type { BattleResultSummary, BattleSetupResponse, DailyChallengeSummary, DeckSummary } from '../lib/battle/api';
 import { BATTLE_MODES, MODE_CREDITS_MULTIPLIER, MODE_LABELS, OPPONENTS, opponentById } from '../lib/battle/opponents';
-import { extremeRewardOptions } from '../lib/rewards';
+import { extremeRewardOptions, extremeFragmentReward } from '../lib/rewards';
 import type { TicketType } from '../lib/pull';
 import { runBattle, stepBattle } from '../lib/battle/simulate';
 import { aiDecision, deciderFor } from '../lib/battle/ai';
@@ -579,7 +579,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
                       <span className="difficulty">{DIFFICULTY_LABEL[opponent.difficulty] ?? opponent.difficulty}</span>
                     </header>
                     <p className="opponent-blurb">{opponent.blurb}</p>
-                    <p className="opponent-reward"><Icon name="ticket" />{mode === 'extreme' ? (cleared ? '첫 보상 수령 완료 · 승리 시 뽑기권 종류 선택' : '승리 시 하급·일반·SR+·SSR+ 중 하나 선택') : cleared ? '첫 보상 수령 완료 · 승리 시 확정 지급' : `${opponent.reward.label} ${opponent.reward.credits}장 · 승리 시 확정 지급`}</p>
+                    <p className="opponent-reward"><Icon name="ticket" />{mode === 'extreme' ? `승리 시 뽑기권 선택 + 쌍둥이 임신의 증거 파편 ${extremeFragmentReward(opponent.id)}개` : cleared ? '첫 보상 수령 완료 · 승리 시 확정 지급' : `${opponent.reward.label} ${opponent.reward.credits}장 · 승리 시 확정 지급`}</p>
                     <button className="btn btn-dark" disabled={!chosenLegal || starting} onClick={() => void start(opponent.id, 'pve', mode)}>
                       이 덱으로 전투<Icon name="arrow" />
                     </button>
@@ -815,7 +815,7 @@ function SummaryBody({ summary, byId }: { summary: BattleResultSummary; byId: Ma
       {summary.rewards.length ? (
         <ul className="reward-list">
           {summary.rewards.map((reward) => (
-            <li key={reward.label}><Icon name="ticket" /><span>{reward.label}</span><strong>{reward.ticketType ? `+${reward.quantity ?? 0}장` : `+${reward.credits}장`}</strong></li>
+            <li key={reward.label}><Icon name="ticket" /><span>{reward.label}</span><strong>{reward.fragments ? `+${reward.fragments}개` : reward.ticketType ? `+${reward.quantity ?? 0}장` : `+${reward.credits}장`}</strong></li>
           ))}
         </ul>
       ) : <p className="deck-note">이번 전투에서 지급된 보상은 없어요.</p>}

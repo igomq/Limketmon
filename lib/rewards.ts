@@ -146,3 +146,8 @@ export function planBattleRewards(input: BattleRewardInput, firstClearCredits: n
   }
   return { credits: claims.reduce((sum, claim) => sum + claim.credits, 0), claims, lines };
 }
+
+/** Fixed extra fragments for an Extreme PvE victory, paid once per battle. */
+export function extremeFragmentReward(opponentId: string): number {
+  return ({ rookie: 1, regular: 1, veteran: 2, ace: 2, boss: 3 } as Record<string, number>)[opponentId] ?? 0;
+}

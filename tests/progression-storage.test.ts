@@ -466,3 +466,25 @@ test('fusion cannot consume a body deployed after validation', async () => {
   assert.ok(injected);
   for(const id of ids) {assert.equal(row(u,id).quantity,4);assert.equal(row(u,id).enhance_level,1);}
 });
+
+
+test('extreme fragments commit once alongside chosen tickets and recover from cached-summary loss', async () => {
+  const u = await user();
+  const a = await battle(u, 'extreme', 'rookie');
+  await assert.rejects(game.finishBattle(u, a.id, a.decisions), /보상을 선택/);
+  assert.equal(state(u).fragments, 0);
+  const receipts = await Promise.all([
+    game.finishBattle(u, a.id, a.decisions, new Date(), 'sr'),
+    game.finishBattle(u, a.id, a.decisions, new Date(), 'ssr')
+  ]);
+  assert.deepEqual(receipts[0], receipts[1]);
+  assert.equal(state(u).fragments, 1);
+  assert.deepEqual(receipts[0].rewards.filter((r) => r.fragments), [{ label: '쌍둥이 임신의 증거 파편', credits: 0, fragments: 1 }]);
+  db.prepare('UPDATE battles SET summary=NULL WHERE id=?').bind(a.id).run();
+  const retry = await game.finishBattle(u, a.id, a.decisions, new Date(), 'low');
+  assert.deepEqual(retry.rewards, receipts[0].rewards);
+  assert.equal(state(u).fragments, 1);
+  const normal = await battle(u, 'normal', 'rookie');
+  await game.finishBattle(u, normal.id, normal.decisions);
+  assert.equal(state(u).fragments, 1);
+});

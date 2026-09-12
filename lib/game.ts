@@ -9,7 +9,7 @@ import { InsufficientTickets, savePull, type TicketType } from './pull';
 import { DECK_SIZE, MAX_DECKS, normalizeDeckName, validateDeck } from './decks';
 import { dailyChallenge, dailyClaimKey, type DailyChallenge } from './daily';
 import { ACHIEVEMENTS, achievementById, achievementClaimKey, evaluateAchievements, type AchievementProgress } from './achievements';
-import { planBattleRewards, pveFirstClearClaimKey, victoryTicketReward } from './rewards';
+import { planBattleRewards, pveFirstClearClaimKey, victoryTicketReward, extremeFragmentReward } from './rewards';
 import { summarizeBattles, type BattleRow } from './stats';
 import { buildSetup, CARD_BY_ID } from './battle/setup';
 import { battleStats } from './battle/stats';
@@ -365,6 +365,22 @@ function privateCouponCode(): string {
 export async function redeemCoupon(userId: string, rawCode: string): Promise<{ snapshot: Snapshot; granted: CouponGrant }> {
   const code = rawCode.trim().toUpperCase();
   const db = getDatabase();
+  const eachCode = (env.PRIVATE_EACH_CARD_COUPON ?? '').trim().toUpperCase();
+  if (eachCode && code === eachCode) {
+    const now = new Date().toISOString();
+    await db.batch([
+      progressionGuard(db, userId, 'EXISTS (SELECT 1 FROM user_game_state WHERE user_id = ?)', [userId]),
+      ...cards.map((card) => db.prepare(`
+        INSERT INTO inventory (user_id, card_id, quantity, first_obtained_at)
+        VALUES (?, ?, 200, ?)
+        ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + 200
+      `).bind(userId, card.id, now))
+    ]);
+    return { snapshot: await getSnapshot(userId), granted: {
+      credits: 0, low: 0, sr: 0, ssr: 0,
+      cards: cards.length * 200, cardTypes: cards.length, copiesPerCard: 200
+    } };
+  }
   const secret = privateCouponCode();
   const isPrivate = Boolean(secret && code === secret);
   const grant = isPrivate ? { credits: 100, low: 100, sr: 100, ssr: 100 } : Object.hasOwn(COUPONS, code) ? COUPONS[code] : undefined;
@@ -1040,6 +1056,7 @@ export async function finishBattle(
     damageDealt: damage
   };
   const nOnly = setup.player.every((card) => card.rarity === 'N') ? 1 : 0;
+  const fragments = result === 'won' && row.kind === 'pve' && mode === 'extreme' ? extremeFragmentReward(row.opponent_id) : 0;
 
   try {
     await db.batch([
@@ -1053,6 +1070,11 @@ export async function finishBattle(
           n_only = ?, decisions = ?, summary = ?, completed_at = ?
         WHERE id = ? AND user_id = ? AND result = 'pending'`)
         .bind(result, simulation.state.round, damage, clutch ? 1 : 0, summary.mvpCardId, nOnly, JSON.stringify(verified), JSON.stringify(summary), claimedAt, battleId, userId),
+      ...(fragments ? [
+        db.prepare('INSERT INTO reward_claims (user_id, claim_key, credits, fragments, battle_id, claimed_at) VALUES (?, ?, 0, ?, ?, ?)')
+          .bind(userId, `fragments:${battleId}`, fragments, battleId, claimedAt),
+        db.prepare('UPDATE user_game_state SET fragments = fragments + ? WHERE user_id = ?').bind(fragments, userId)
+      ] : []),
       ...plan.claims.map((claim) => db.prepare('INSERT OR IGNORE INTO reward_claims (user_id, claim_key, credits, ticket_type, ticket_quantity, battle_id, claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .bind(userId, claim.key, claim.credits, claim.ticketType ?? null, claim.quantity ?? 0, battleId, claimedAt)),
       ...(victory ? [`ticket:${battleId}`, pveFirstClearClaimKey(row.opponent_id, mode)].map((key) =>
@@ -1110,11 +1132,12 @@ async function buildAuthoritativeSummary(
 ): Promise<BattleResultSummary> {
   // Read back actual inserted claims for this battle to build authoritative paid summary.
   const actualClaimsResult = await db.prepare(
-    'SELECT claim_key, credits, ticket_type, ticket_quantity FROM reward_claims WHERE user_id = ? AND battle_id = ? AND claim_key != ?'
+    'SELECT claim_key, credits, ticket_type, ticket_quantity, fragments FROM reward_claims WHERE user_id = ? AND battle_id = ? AND claim_key != ?'
   ).bind(userId, battleId, `settle:${battleId}`).all();
-  const actualClaims = actualClaimsResult.results as Array<{ claim_key: string; credits: number; ticket_type: string | null; ticket_quantity: number }>;
+  const actualClaims = actualClaimsResult.results as Array<{ claim_key: string; credits: number; ticket_type: string | null; ticket_quantity: number; fragments: number }>;
   const actualRewards: RewardLine[] = [];
   for (const c of actualClaims) {
+    if (c.fragments > 0) actualRewards.push({ label: '쌍둥이 임신의 증거 파편', credits: 0, fragments: c.fragments });
     if (c.credits > 0) {
       let label = '격파 보상';
       if (c.claim_key.startsWith('pve_first:')) label = '첫 격파 보상';

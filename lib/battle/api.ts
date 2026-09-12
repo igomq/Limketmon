@@ -43,6 +43,7 @@ export interface RewardLine {
   /** Set on ticket payouts (low/normal/sr/ssr); credits are 0 for those lines. */
   readonly ticketType?: TicketType;
   readonly quantity?: number;
+  readonly fragments?: number;
 }
 
 export interface BattleResultSummary {

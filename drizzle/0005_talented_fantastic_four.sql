@@ -1,0 +1,1 @@
+ALTER TABLE `reward_claims` ADD `fragments` integer DEFAULT 0 NOT NULL;

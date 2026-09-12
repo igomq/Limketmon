@@ -163,6 +163,7 @@ export const rewardClaims = sqliteTable(
     // Ticket payouts ride the same idempotency gate: one claim row, credits 0, ticket_type set.
     ticketType: text('ticket_type'),
     ticketQuantity: integer('ticket_quantity').notNull().default(0),
+    fragments: integer('fragments').notNull().default(0),
     battleId: text('battle_id'),
     claimedAt: text('claimed_at').notNull()
   },
