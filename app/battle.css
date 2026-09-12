@@ -510,3 +510,34 @@ html[data-battle='running'] .battle-actions.sticky-bar { bottom: max(.5rem, env(
 .skill-casts .skill-block { padding: 0; border: 0; font-size: .75rem; }
 .battle-actions .action-hint { flex: 0 0 auto; font-size: .8125rem; }
 @media (max-width: 359px) { .skill-casts { grid-template-columns: minmax(0, 1fr); } }
+
+/* Explicit Extreme palette for arena surfaces and semantic feedback. */
+html[data-extreme] .battle-row.enemy { background: linear-gradient(180deg, #2c1919, #1e1411); }
+html[data-extreme] .battle-row.ally { background: linear-gradient(0deg, #201d17, #171510); }
+html[data-extreme] .unit-tile { background: #241c18; }
+html[data-extreme] .unit-turn { background: #5b4523; color: #f6e4be; }
+html[data-extreme] .battle-card-panel,
+html[data-extreme] .replay-log,
+html[data-extreme] .enhance-panel,
+html[data-extreme] .result-sheet .result-summary { background: #211a14; }
+html[data-extreme] .battle-action.is-skill,
+html[data-extreme] .battle-action.is-unlocked { background: #302416; border-color: #665033; }
+html[data-extreme] .battle-action.is-unlocked .icon { color: #ddbd7e; }
+html[data-extreme] .battle-action:not(:disabled):active { background: #463322; }
+html[data-extreme] .skill-casts .battle-action:disabled,
+html[data-extreme] .battle-action:disabled,
+html[data-extreme] .enhance-skill-list li[data-locked='true'] { background: #191512; border-color: #3a2f22; }
+html[data-extreme] .result-close,
+html[data-extreme] .unit-enhance,
+html[data-extreme] .replay-end { background: #33271d; color: var(--ink); }
+html[data-extreme] .unit-transcend { background: #30233a; color: #dfc7f5; }
+html[data-extreme] .status-chip { background: #30271e; color: #eedfc9; border-color: #695337; }
+html[data-extreme] .fx { background: #231b16f2; color: var(--ink); }
+html[data-extreme] .fx-crit { background: #754928; }
+html[data-extreme] .battle-log li[data-tone='heal'],
+html[data-extreme] .result-sheet[data-result='won'] .result-hero h2 { color: #9cd6ae; }
+html[data-extreme] .battle-log li[data-tone='shield'] { color: #a9ccef; }
+html[data-extreme] .battle-log li[data-tone='status'] { color: #d9b9ee; }
+html[data-extreme] .skill-block,
+html[data-extreme] .result-sheet[data-result='lost'] .result-hero h2 { color: #efb0a2; }
+html[data-extreme] .clear-badge { background: #213629; color: #b0dfbf; }

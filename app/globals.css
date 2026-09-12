@@ -804,3 +804,26 @@ h2 { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.35; letter-spacing: -
 .account-reset > p { max-width: 65ch; margin: .5rem 0 1rem; }
 .account-reset form { display: grid; gap: .75rem; max-width: 28rem; }
 .account-reset input { min-width: 0; min-height: 44px; padding: .6rem .8rem; border: 1px solid var(--line); border-radius: .5rem; }
+
+/* Extreme uses dark surfaces, not light-theme foreground tokens as button fills. */
+html[data-extreme] .topbar { background: #100c09ed; }
+html[data-extreme] .topbar::after { background: linear-gradient(#100c0999, transparent); }
+html[data-extreme] .main-nav { background: #211a14f2; border-color: var(--line); box-shadow: 0 6px 30px #00000066; }
+html[data-extreme] .nav-indicator { background: #392c1f; box-shadow: 0 2px 5px #00000040; }
+html[data-extreme] .btn-primary { background: #d7b45a; color: #21170d; box-shadow: 0 4px 12px #00000040; }
+html[data-extreme] .btn-primary:hover:not(:disabled) { background: #e2c477; }
+html[data-extreme] .btn-dark,
+html[data-extreme] .skip-link { background: #33261b; color: #f3ead7; border-color: #695337; }
+html[data-extreme] .btn-dark:hover:not(:disabled) { background: #463322; }
+html[data-extreme] .icon-button:hover:not(:disabled),
+html[data-extreme] .detail-back { background: #33271d; color: var(--ink); }
+html[data-extreme] .detail-sheet { border-color: var(--line); box-shadow: 0 24px 72px #00000099; }
+html[data-extreme] .card-badge,
+html[data-extreme] .trait-panel,
+html[data-extreme] .transcend-panel,
+html[data-extreme] .dismantle-panel { background: #241c15; border-color: var(--line); }
+html[data-extreme] .transcend-tag,
+html[data-extreme] .card-badge.is-transcend,
+html[data-extreme] .trait-row.is-transcended { background: #30233a; color: #dfc7f5; border-color: #68517c; }
+html[data-extreme] .detail-dialog::backdrop,
+html[data-extreme] .confirm-dialog::backdrop { background: #00000099; }
