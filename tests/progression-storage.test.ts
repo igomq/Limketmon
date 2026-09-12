@@ -488,3 +488,29 @@ test('extreme fragments commit once alongside chosen tickets and recover from ca
   await game.finishBattle(u, normal.id, normal.decisions);
   assert.equal(state(u).fragments, 1);
 });
+
+
+test('N can transcend through SSR to XR, opening a slot each time and charging the current grade', async () => {
+  const u = await user();
+  let id = own(u, 'N', 1, 5, []);
+  balances(u, 100000, 0, 30);
+  const ids = ['damage', 'synergy', 'resist_earth', 'resist_water', 'resist_fire'] as const;
+  const grades = ['R', 'SR', 'SSR', 'UR', 'XR'];
+  for (let step = 0; step < ids.length; step++) {
+    const traitId = ids[step];
+    for (let level = 0; level < 10; level++) await applyProgression(u, { action: 'trait', cardId: id, traitId });
+    const preview = await applyProgression(u, { action: 'transcend', cardId: id, traitId, preview: true });
+    assert.ok(preview.preview.warning.includes(`증거 ${step + 1}개`));
+    const before = state(u).twin_proof;
+    const reply = await applyProgression(u, { action: 'transcend', cardId: id, traitId });
+    id = reply.cardId!;
+    assert.equal(before - state(u).twin_proof, step + 1);
+    const progress = game.progressOf(row(u, id));
+    assert.equal(progress.rarity, grades[step]);
+    assert.equal(progress.traits.length, step + 1);
+    assert.ok(progress.traits.every((t) => t.transcended));
+    assert.equal((await import('../lib/progression.ts')).traitSlotLimit(progress.traits), step + 3);
+    assert.equal(parseDeckSlots([{ id, progress }])[0]!.progress!.traits.length, step + 1);
+  }
+  assert.equal(state(u).twin_proof, 15);
+});

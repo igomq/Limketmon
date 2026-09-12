@@ -36,8 +36,6 @@ export interface CardProgress {
 export const MAX_TRAIT_LEVEL = 20;
 /** A card carries at most two different traits. */
 export const MAX_TRAITS = 2;
-/** After any transcend, one extra trait slot opens. */
-export const MAX_TRAITS_TRANSCENDED = 3;
 /** Highest resistance a single resist trait reaches (20 + transcend = 70%). */
 export const MAX_RESIST = 0.7;
 
@@ -100,7 +98,6 @@ export function parseTraits(raw: unknown): Trait[] {
   if (!Array.isArray(value)) return [];
   const traits: Trait[] = [];
   for (const item of value) {
-    if (traits.length >= MAX_TRAITS_TRANSCENDED) break;
     if (!item || typeof item !== 'object') continue;
     const row = item as { id?: unknown; level?: unknown; transcended?: unknown; spentProof?: unknown; refundEstimated?: unknown };
     if (typeof row.id !== 'string' || !TRAIT_ID_SET.has(row.id)) continue;
@@ -113,12 +110,12 @@ export function parseTraits(raw: unknown): Trait[] {
       ...(typeof row.refundEstimated === 'boolean' ? { refundEstimated: row.refundEstimated } : {})
     });
   }
-  return traits.some((trait) => trait.transcended) ? traits : traits.slice(0, MAX_TRAITS);
+  return traits;
 }
 
-/** 2 slots until a card has transcended at least once, then 3. */
+/** Each transcended trait frees another slot; existing traits are never discarded. */
 export function traitSlotLimit(traits: readonly Trait[]): number {
-  return traits.some((trait) => trait.transcended) ? MAX_TRAITS_TRANSCENDED : MAX_TRAITS;
+  return Math.max(traits.length, MAX_TRAITS + traits.filter((trait) => trait.transcended).length);
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import {
   nextRarity,
   traitCost,
   traitSlotLimit,
+  twinProofCost,
   traitValue,
   type Trait,
   type TraitId
@@ -200,7 +201,7 @@ export function GrowthView({ user, snapshot, run, busy, onOpenCard }: {
               <li><span>쌍둥이 임신의 증거 파편</span><strong>-5</strong></li>
               <li><span>쌍둥이 임신의 증거</span><strong>+1</strong></li>
             </ul>
-            <p className="confirm-note">쌍둥이 임신의 증거는 한 장을 초월할 때 1개 씁니다.</p>
+            <p className="confirm-note">초월 비용은 현재 등급에 따라 N 1개 · R 2개 · SR 3개 · SSR 4개 · UR 5개입니다.</p>
           </ConfirmSheet>
         )}
       </AnimatePresence>
@@ -575,7 +576,7 @@ export function TraitPanel({ card, row, materials, run, busy }: {
     <section className="trait-panel" aria-labelledby={`trait-title-${row.cardId}`}>
       <span className="eyebrow">TRAITS · {row.traits.length} / {slots}</span>
       <h3 id={`trait-title-${row.cardId}`}>특성</h3>
-      <p className="trait-intro">서로 다른 특성을 최대 {slots}개까지. 초월하면 슬롯이 하나 더 열립니다. 선택하면 첫 +1 비용이 바로 차감되고, 5레벨마다 효과가 크게 오릅니다.</p>
+      <p className="trait-intro">서로 다른 특성을 최대 {slots}개까지. 초월할 때마다 슬롯이 하나씩 더 열립니다. 선택하면 첫 +1 비용이 바로 차감되고, 5레벨마다 효과가 크게 오릅니다.</p>
       {row.traits.length ? (
         <ul className="trait-list">
           {row.traits.map((trait) => {
@@ -771,7 +772,8 @@ export function TranscendPanel({ card, row, materials, run, busy }: {
   const eligible = row.traits.filter((trait) => !trait.transcended && trait.level >= 10);
   const chosen = traitId ?? eligible[0]?.id ?? null;
   const enhanced = row.enhanceLevel >= 5;
-  const affordable = materials.twinProof >= 1;
+  const cost = twinProofCost(row.rarity);
+  const affordable = materials.twinProof >= cost;
   const ready = !capped && enhanced && !!chosen && affordable;
 
   async function commit() {
@@ -797,7 +799,7 @@ export function TranscendPanel({ card, row, materials, run, busy }: {
         <li data-met={!capped}><Icon name={capped ? 'clock' : 'check'} />등급 여유<span>{capped ? 'XR은 더 올릴 수 없어요' : `${card.rarity} → ${target}`}</span></li>
         <li data-met={enhanced}><Icon name={enhanced ? 'check' : 'clock'} />강화 +5 이상<span>현재 +{row.enhanceLevel}</span></li>
         <li data-met={eligible.length > 0}><Icon name={eligible.length ? 'check' : 'clock'} />비초월 특성 +10<span>{eligible.length ? eligible.map((trait) => TRAIT_LABEL[trait.id]).join(' · ') : '아직 +10 특성이 없어요'}</span></li>
-        <li data-met={affordable}><Icon name={affordable ? 'check' : 'clock'} />쌍둥이 임신의 증거 1개<span>보유 {materials.twinProof}개</span></li>
+        <li data-met={affordable}><Icon name={affordable ? 'check' : 'clock'} />쌍둥이 임신의 증거 {cost}개<span>보유 {materials.twinProof}개</span></li>
       </ul>
       {eligible.length > 0 ? (
         <div className="sort-toggle" role="group" aria-label="초월할 특성">
@@ -807,7 +809,7 @@ export function TranscendPanel({ card, row, materials, run, busy }: {
         </div>
       ) : null}
       <button className="btn btn-primary" disabled={working || !ready} onClick={() => setConfirming(true)}>
-        {capped ? '초월 완료' : !enhanced ? '강화 +5 필요' : !chosen ? '특성 +10 필요' : !affordable ? '쌍둥이 임신의 증거 1개 필요' : '초월 확인'}
+        {capped ? '초월 완료' : !enhanced ? '강화 +5 필요' : !chosen ? '특성 +10 필요' : !affordable ? `쌍둥이 임신의 증거 ${cost}개 필요` : '초월 확인'}
       </button>
       {note && <p className={`enhance-note ${note.error ? 'is-error' : ''}`} role={note.error ? 'alert' : 'status'}>{note.text}</p>}
 
@@ -822,9 +824,9 @@ export function TranscendPanel({ card, row, materials, run, busy }: {
             onClose={() => setConfirming(false)}
           >
             <ul className="confirm-list">
-              <li><span>{cardTitle(card)} · {TRAIT_LABEL[chosen]} 초월</span><strong>+1.75배</strong></li>
+              <li><span>{cardTitle(card)} · {TRAIT_LABEL[chosen]} 초월</span><strong>효과 2배</strong></li>
               <li><span>등급</span><strong>{card.rarity} → {target}</strong></li>
-              <li><span>쌍둥이 임신의 증거</span><strong>-1</strong></li>
+              <li><span>쌍둥이 임신의 증거</span><strong>-{cost}개</strong></li>
             </ul>
             <p className="confirm-note">강화 +{row.enhanceLevel}과 다른 특성{row.traits.filter((trait) => trait.id !== chosen).length ? ` (${row.traits.filter((trait) => trait.id !== chosen).map((trait) => TRAIT_LABEL[trait.id]).join(' · ')})` : ''}은 새 초월 카드에 유지됩니다. 남은 재료는 +0·특성 없음입니다.</p>
           </ConfirmSheet>

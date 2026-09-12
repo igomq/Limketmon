@@ -122,7 +122,7 @@ test('parseTraits survives stored JSON, junk ids, duplicates and overflow', () =
   assert.deepEqual(parseTraits([{ id: 'nope', level: 3 }, { id: 'damage', level: 3 }, { id: 'damage', level: 9 }]), [
     { id: 'damage', level: 3, transcended: false }
   ]);
-  // At most two traits per card, levels clamp to 0..20, only a real true marks a transcend.
+  // Preserve all valid distinct stored traits; capacity is enforced when adding one.
   assert.deepEqual(
     parseTraits([
       { id: 'damage', level: 3 },
@@ -131,7 +131,8 @@ test('parseTraits survives stored JSON, junk ids, duplicates and overflow', () =
     ]),
     [
       { id: 'damage', level: 3, transcended: false },
-      { id: 'synergy', level: 20, transcended: false }
+      { id: 'synergy', level: 20, transcended: false },
+      { id: 'resist_fire', level: 0, transcended: false }
     ]
   );
   assert.deepEqual(parseTraits(['damage', 7]), []);
