@@ -476,3 +476,24 @@
   .unit-position,
   .unit-enhance { border-color: var(--ink); }
 }
+
+/* Only the battle dock scrolls; deck and growth sticky bars retain their layout. */
+html[data-battle='running'] .topbar,
+html[data-battle='running'] .main-nav,
+html[data-battle='running'] .footer { display: none; }
+html[data-battle='running'] .page { padding-top: max(.75rem, env(safe-area-inset-top)); padding-bottom: 1rem; min-height: 100dvh; }
+html[data-battle='running'] .battle-stage { margin-top: 0; }
+html[data-battle='running'] .battle-head { flex-wrap: wrap; }
+html[data-battle='running'] .battle-head > .text-button { flex-basis: 100%; justify-content: flex-start; }
+html[data-battle='running'] .battle-side { top: 1rem; }
+.battle-actions.sticky-bar { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: .5rem; max-height: min(42dvh, 22rem); padding: .6rem; overflow: hidden; background: var(--paper); backdrop-filter: none; -webkit-backdrop-filter: none; }
+html[data-battle='running'] .battle-actions.sticky-bar { bottom: max(.5rem, env(safe-area-inset-bottom)); }
+.skill-casts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: max-content; align-content: start; align-items: start; gap: .5rem; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .25rem; scrollbar-gutter: stable; }
+.skill-casts .battle-action { min-width: 0; min-height: 44px; align-items: flex-start; overflow-wrap: anywhere; }
+.battle-actions.is-compact .battle-action { padding: .45rem .55rem; gap: .35rem; }
+.battle-actions.is-compact .battle-action strong { font-size: .875rem; }
+.battle-actions.is-compact .battle-action .icon { width: 1rem; height: 1rem; margin-top: .15rem; }
+.skill-casts .battle-action:disabled { opacity: 1; color: var(--secondary); background: #f3f4f6; border-color: var(--line); }
+.skill-casts .skill-block { padding: 0; border: 0; font-size: .75rem; }
+.battle-actions .action-hint { flex: 0 0 auto; font-size: .8125rem; }
+@media (max-width: 359px) { .skill-casts { grid-template-columns: minmax(0, 1fr); } }

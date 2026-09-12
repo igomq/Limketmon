@@ -136,29 +136,23 @@ test('fresh costs follow actual grade; singleton transcend transfers budget and 
   assert.equal(state(u).proof, before + Math.floor((paid + traitCost('R', 10)) / 2));
 });
 
-test('stack transcend initializes source history once and never clones either budget', async () => {
+test('stack transcend moves the refund budget to one body and leaves untrained materials', async () => {
   const other: Trait = { id: 'synergy', level: 7, transcended: false };
   const u = await setup([trait(), other], 3);
   const sourcePaid = Array.from({ length: 10 }, (_, i) => traitCost('N', i)).reduce((a, b) => a + b, 0);
-  for (let i = 0; i < 2; i++) {
-    const result = await request(u, 'transcend');
-    assert.ok('cardId' in result && result.cardId);
-    assert.equal(traitsOf(u)[0].transcended, false); assert.equal(traitsOf(u)[0].spentProof, sourcePaid);
-    assert.ok(traitsOf(u)[1].spentProof! > 0);
-    assert.deepEqual(traitsOf(u, result.cardId).map((t) => t.spentProof), [0, 0]);
-    assert.equal((await preview(u, result.cardId)).proof, 0);
-    await request(u, 'trait', {}, result.cardId);
-    assert.equal(traitsOf(u, result.cardId)[0].spentProof, traitCost('R', 10));
-    const balance = state(u).proof;
-    await remove(u, result.cardId);
-    assert.equal(state(u).proof, balance + Math.floor(traitCost('R', 10) / 2));
-  }
-  assert.equal(row(u).quantity, 1);
+  const result = await request(u, 'transcend');
+  assert.ok('cardId' in result && result.cardId);
+  assert.equal(traitsOf(u, result.cardId)[0].spentProof, sourcePaid);
+  assert.equal((await preview(u, result.cardId)).proof, Math.floor(sourcePaid / 2));
+  assert.equal(row(u).quantity, 2); assert.equal(row(u).enhance_level, 0); assert.equal(row(u).traits, '[]');
+  await assert.rejects(() => preview(u));
+  await assert.rejects(() => request(u, 'transcend'));
+  await request(u, 'trait', {}, result.cardId);
+  assert.equal(traitsOf(u, result.cardId)[0].spentProof, sourcePaid + traitCost('R', 10));
   const balance = state(u).proof;
-  await remove(u);
-  assert.equal(state(u).proof, balance + Math.floor(sourcePaid / 2));
+  await remove(u, result.cardId);
+  assert.equal(state(u).proof, balance + Math.floor((sourcePaid + traitCost('R', 10)) / 2));
 });
-
 
 test('legacy singleton promotion carries original-grade history without inventing an estimate', async () => {
   const u = await setup([trait()]);

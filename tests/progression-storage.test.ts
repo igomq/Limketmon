@@ -97,7 +97,9 @@ test('preview and bulk boundaries never write; UR dismantle pays exact guarantee
   const before=dump(u);
   const preview=await applyProgression(u,{action:'bulk-dismantle',rarity:'N',maxEnhance:2,includeBase:false,preview:true});
   assert.deepEqual(preview.preview.cards,[{cardId:n,quantity:2}]); assert.equal(dump(u),before);
-  await assert.rejects(()=>applyProgression(u,{action:'bulk-dismantle',rarity:'N',maxEnhance:1,includeBase:true,preview:true}));
+  const materialsOnly=await applyProgression(u,{action:'bulk-dismantle',rarity:'N',maxEnhance:1,includeBase:true,preview:true});
+  assert.deepEqual(materialsOnly.preview.cards,[{cardId:n,quantity:2}]);
+  assert.ok(!materialsOnly.preview.warning.includes('강화 또는 특성'),'untrained duplicates do not inherit the body growth');
   await assert.rejects(()=>applyProgression(u,{action:'bulk-dismantle',rarity:'N',maxEnhance:2,includeBase:true}));
   await dismantle(u,ur,2); assert.equal(state(u).proof,50); assert.equal(state(u).fragments,2); assert.equal(row(u,ur),null); assert.equal(row(u,r).quantity,4);
 });
@@ -158,16 +160,16 @@ test('craft twin consumes exactly five fragments and concurrent requests cannot 
   assert.equal(results.filter((r)=>r.status==='fulfilled').length,1); assert.equal(state(u).fragments,0); assert.equal(state(u).twin_proof,1);
 });
 
-test('transcend splits one copy, preserves all progress, and moves a singleton deck reference',async()=>{
+test('transcend moves one body and its budget and deck reference, leaving untrained materials',async()=>{
   for(const quantity of [1,3]) {
     const u=await user(), traits=[trait(),{id:'synergy',level:7,transcended:false}], id=own(u,'SSR',quantity,5,traits); balances(u);
     db.prepare('INSERT INTO deck_cards VALUES (?,0,?)').bind(u,id).run();
     const result=await trans(u,id); assert.ok(result.cardId);
     const output=row(u,result.cardId); assert.equal(output.rarity_override,'UR'); assert.equal(output.enhance_level,5); assert.equal(output.quantity,1);
-    assert.deepEqual(JSON.parse(output.traits),[{...trait(),transcended:true,spentProof:quantity===1?400:0,...(quantity>1?{refundEstimated:false}:{})},{...traits[1],spentProof:quantity===1?190:0,...(quantity>1?{refundEstimated:false}:{})}]); assert.equal(state(u).twin_proof,4);
+    assert.deepEqual(JSON.parse(output.traits),[{...trait(),transcended:true,spentProof:400},{...traits[1],spentProof:190}]); assert.equal(state(u).twin_proof,4);
     assert.equal(row(u,id)?.quantity ?? 0,quantity-1);
-    assert.equal(db.prepare('SELECT card_id FROM deck_cards WHERE deck_id=?').bind(u).first().card_id,quantity===1?result.cardId:id);
-    if(quantity>1) assert.deepEqual(JSON.parse(row(u,id).traits),[{...traits[0],spentProof:400},{...traits[1],spentProof:190}]);
+    assert.equal(db.prepare('SELECT card_id FROM deck_cards WHERE deck_id=?').bind(u).first().card_id,result.cardId);
+    if(quantity>1) { assert.equal(row(u,id).enhance_level,0); assert.equal(row(u,id).traits,'[]'); await assert.rejects(()=>trans(u,id)); }
   }
 });
 
@@ -194,10 +196,17 @@ test('fusion resets output and excludes all input base kinds without merging enh
 
 test('fusion validates same grade, count, minimum enhance, UR/XR prohibition and deck protection',async()=>{
   for(const [rarity,level,count,ok] of [['SR',0,3,false],['SR',1,3,true],['SSR',1,3,false],['SSR',2,3,true],['UR',5,3,false],['XR',5,2,false]] as const){
-    const u=await user(),id=own(u,rarity,4,level,[],crypto.randomUUID(),card('N').id),before=dump(u);
-    const call=()=>applyProgression(u,{action:'fuse',count,cards:[{cardId:id,quantity:count}]});
-    if(ok){const result=await call();assert.equal(row(u,result.cardId).enhance_level,0);assert.equal(row(u,id).quantity,4-count);}
+    const u=await user();
+    const ids=Array.from({length:count},()=>own(u,rarity,4,level,[],crypto.randomUUID(),card('N').id));
+    const before=dump(u);
+    const call=()=>applyProgression(u,{action:'fuse',count,cards:ids.map(cardId=>({cardId,quantity:1}))});
+    if(ok){const result=await call();assert.equal(row(u,result.cardId).enhance_level,0);for(const id of ids){assert.equal(row(u,id).quantity,3);assert.equal(row(u,id).enhance_level,0);}}
     else {await assert.rejects(call);assert.equal(dump(u),before);}
+  }
+  {
+    const u=await user(), id=own(u,'SR',5,1), before=dump(u);
+    await assert.rejects(()=>applyProgression(u,{action:'fuse',count:3,cards:[{cardId:id,quantity:3}]}));
+    assert.equal(dump(u),before,'one enhanced body cannot count as three enhanced cards');
   }
   const u=await user(),a=own(u),b=own(u,'R'); const before=dump(u);
   for(const cards of [[{cardId:a,quantity:1},{cardId:b,quantity:1}],[{cardId:a,quantity:3}]]) await assert.rejects(()=>applyProgression(u,{action:'fuse',count:2,cards}));
@@ -207,7 +216,7 @@ test('fusion validates same grade, count, minimum enhance, UR/XR prohibition and
   await assert.rejects(()=>applyProgression(u,{action:'fuse',count:3,cards:[{cardId:a,quantity:3}]}));
 });
 
-test('public coupon concurrent receipt and hidden repeated all-catalog grant preserve enhancement',async()=>{
+test('public coupon concurrent receipt and private ticket grants preserve cards',async()=>{
   const u=await user(),id=own(u,'N',5,9,[trait()]);
   const results=await Promise.allSettled([game.redeemCoupon(u,'LIMKETMON'),game.redeemCoupon(u,'LIMKETMON')]);
   const success=results.filter((r)=>r.status==='fulfilled');assert.equal(success.length,1);
@@ -216,9 +225,10 @@ test('public coupon concurrent receipt and hidden repeated all-catalog grant pre
   env.PRIVATE_CARD_COUPON='INTERNAL-FIXTURE-COUPON';
   try { await Promise.all([game.redeemCoupon(u,' internal-fixture-coupon '),game.redeemCoupon(u,'INTERNAL-FIXTURE-COUPON')]); }
   finally { delete env.PRIVATE_CARD_COUPON; }
-  const rows=await game.ownedRows(u);assert.equal(rows.length,game.cards.length);
-  for(const c of game.cards) assert.equal(row(u,c.id).quantity,c.id===id?205:200);
-  assert.equal(row(u,id).enhance_level,9);assert.deepEqual(JSON.parse(row(u,id).traits),[trait()]);assert.equal((await game.getSnapshot(u)).completion,100);
+  const rows=await game.ownedRows(u);assert.equal(rows.length,1);
+  assert.equal(row(u,id).quantity,5);
+  assert.equal(state(u).pull_credits,210); assert.equal(state(u).low_tickets,250); assert.equal(state(u).sr_tickets,200); assert.equal(state(u).ssr_tickets,201);
+  assert.equal(row(u,id).enhance_level,9);assert.deepEqual(JSON.parse(row(u,id).traits),[trait()]);assert.equal((await game.getSnapshot(u)).completion,Math.round(100/game.cards.length));
 });
 
 test('private coupon stays disabled without a secret and repeats with one, leaking nothing',async()=>{
@@ -232,12 +242,13 @@ test('private coupon stays disabled without a secret and repeats with one, leaki
     env.PRIVATE_CARD_COUPON='  internal-fixture-coupon  ';
     for(const code of ['INTERNAL-FIXTURE-COUPON','internal-fixture-coupon',' internal-fixture-coupon ']){
       const receipt=await game.redeemCoupon(u,code);
-      assert.deepEqual(receipt.granted,{credits:0,low:0,sr:0,ssr:0,cards:game.cards.length*100,cardTypes:game.cards.length,copiesPerCard:100});
+      assert.deepEqual(receipt.granted,{credits:100,low:100,sr:100,ssr:100});
       assert.ok(!JSON.stringify(receipt).includes('fixture'));
     }
   } finally { delete env.PRIVATE_CARD_COUPON; }
-  const rows=await game.ownedRows(u);assert.equal(rows.length,game.cards.length);
-  for(const c of game.cards) assert.equal(row(u,c.id).quantity,c.id===id?305:300);
+  const rows=await game.ownedRows(u);assert.equal(rows.length,1);
+  assert.equal(row(u,id).quantity,5);
+  assert.equal(state(u).pull_credits,300); assert.equal(state(u).low_tickets,300); assert.equal(state(u).sr_tickets,300); assert.equal(state(u).ssr_tickets,300);
   assert.equal(row(u,id).enhance_level,9);assert.deepEqual(JSON.parse(row(u,id).traits),[trait()]);
   assert.equal(db.prepare('SELECT COUNT(*) AS c FROM coupon_redemptions WHERE user_id=?').bind(u).first().c,0);
 });
@@ -417,4 +428,39 @@ test('owned variant deck validation, shared enhancement and transcend preserve b
   assert.equal((await game.listDecks(u))[0]!.cards[0],evolved.cardId);
   const after=await game.replayBattle(u,started.battleId);
   assert.deepEqual(after.setup,before.setup);assert.deepEqual(after.events,before.events);
+});
+
+
+test('account reset wins over an in-flight battle settlement without restoring rewards', async () => {
+  const u=await user(), match=await battle(u,'normal','rookie');
+  const original=db.batch.bind(db); let injected=false;
+  db.batch=async(statements)=>{
+    if(!injected && statements.some((s)=>s.query.includes("result = 'pending'") && s.query.includes('EXISTS'))) {
+      injected=true;
+      await game.resetAccount(u);
+    }
+    return original(statements);
+  };
+  try { await assert.rejects(()=>game.finishBattle(u,match.id,match.decisions)); }
+  finally { db.batch=original; }
+  assert.ok(injected);
+  assert.equal(state(u).pull_credits,0); assert.equal(state(u).low_tickets,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reward_claims WHERE user_id=?').bind(u).first().n,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM battles WHERE user_id=?').bind(u).first().n,0);
+});
+
+test('fusion cannot consume a body deployed after validation', async () => {
+  const u=await user();
+  const ids=game.cards.filter(c=>c.rarity==='SR').slice(0,3).map(c=>own(u,'SR',4,1,[],c.id,c.id));
+  const original=db.batch.bind(db);let injected=false;
+  db.batch=async(statements)=>{
+    if(!injected && statements.some(s=>s.query.includes('UPDATE inventory SET quantity'))) {
+      injected=true;db.prepare('INSERT INTO deck_cards VALUES (?,0,?)').bind(u,ids[2]).run();
+    }
+    return original(statements);
+  };
+  try { await assert.rejects(()=>applyProgression(u,{action:'fuse',count:3,cards:ids.map(cardId=>({cardId,quantity:1}))})); }
+  finally {db.batch=original;}
+  assert.ok(injected);
+  for(const id of ids) {assert.equal(row(u,id).quantity,4);assert.equal(row(u,id).enhance_level,1);}
 });

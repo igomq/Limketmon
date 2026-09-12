@@ -326,7 +326,9 @@ export function CardDetail({ card, quantity, materialCount, enhanceLevel = 0, un
             <div className="enhance-panel">
               <span className="eyebrow">ENHANCE</span>
               <p>같은 카드를 소모해 전투 수치를 올립니다. 단계가 오를수록 더 많이 필요하고, 표시 수치는 등급별 곡선에 따른 근사치입니다.</p>
-              <p className="enhance-level">{enhanceLevel ? '강화 +' + enhanceLevel + ' / +' + MAX_ENHANCE : '아직 강화하지 않음'}</p>
+              <p className="enhance-level">본체 1장 · 강화 +{enhanceLevel} / +{MAX_ENHANCE}</p>
+              <p>중복 재료 {enhanceMaterials(quantity)}장 · +0 · 특성 없음</p>
+              <p>같은 원본 카드에서 쓸 수 있는 강화 재료: {materials}장</p>
               {onEnhance ? (
                 <button
                   type="button"

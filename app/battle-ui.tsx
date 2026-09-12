@@ -224,6 +224,11 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
   const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
   const rows = useMemo(() => new Map(inventory?.map((item) => [item.cardId, item]) ?? []), [inventory]);
   const [phase, setPhase] = useState<'select' | 'battle'>('select');
+  useEffect(() => {
+    if (phase !== 'battle') return;
+    document.documentElement.dataset.battle = 'running';
+    return () => { delete document.documentElement.dataset.battle; };
+  }, [phase]);
   const [deckId, setDeckId] = useState('');
   const [mode, setMode] = useState<BattleMode>('normal');
   const [starting, setStarting] = useState(false);
@@ -612,6 +617,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
     <section className="battle-view" aria-labelledby="battle-arena-title">
       <div className="battle-stage">
         <header className="battle-head">
+          <button className="text-button" onClick={reset}><Icon name="back" />대련 나가기</button>
           <div>
             <p className="eyebrow">{state.kind === 'daily' ? 'DAILY CHALLENGE' : `PVE BATTLE · ${MODE_LABELS[setup?.mode ?? 'normal']}`}</p>
             <h1 id="battle-arena-title">{setup?.opponentName ?? '대련'}</h1>
@@ -672,7 +678,8 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
         </div>
 
         {state.status === 'active' ? (
-          <div className="battle-actions sticky-bar">
+          <div className={`battle-actions sticky-bar${unlockedSkills.length ? ' is-compact' : ''}`}>
+            <div className="skill-casts" role="group" aria-label="전투 행동" tabIndex={0}>
             <button className="battle-action" disabled={!canAct} onClick={() => act('attack')}>
               <Icon name="hand" />
               <span>
@@ -686,7 +693,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
                 <span>
                   <strong>{ability.name}</strong>
                   <small>기운 {ability.cost}{ability.cooldown > 0 ? ` · ${ability.cooldown}턴 대기` : ''} · 기본 기술</small>
-                  <em>{describeOps(ability.ops)}</em>
+                  {!unlockedSkills.length && <em>{describeOps(ability.ops)}</em>}
                   {blockedReason(ability) && <i className="skill-block">{blockedReason(ability)}</i>}
                 </span>
               </button>
@@ -698,11 +705,11 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
                   <strong>{skill.name}</strong>
                   <small>기운 {skill.cost}{skill.cooldown > 0 ? ` · ${skill.cooldown}턴 대기` : ''} · 해금 기술</small>
                   <em>{describeOps(skill.ops)}</em>
-                  <i className="skill-flavor">{skill.description}</i>
                   {blockedReason(skill) && <i className="skill-block">{blockedReason(skill)}</i>}
                 </span>
               </button>
             ))}
+            </div>
             <p className="action-hint" role="status">
               <Icon name={animating || !myTurn ? 'clock' : anySkillReady ? 'check' : 'sparkle'} />
               {notice ?? actionHint}

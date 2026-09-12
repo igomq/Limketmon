@@ -20,7 +20,7 @@ const DeckView = lazy(() => import('./deck-ui').then((module) => ({ default: mod
 type User = { email: string; displayName: string } | null;
 type Feedback = { text: string; error: boolean } | null;
 /** POST /api/progression answer. `preview` comes back instead of a write when preview:true. */
-type ProgressionResponse = { snapshot?: Snapshot; message?: string; preview?: ProgressionPreview; error?: string };
+type ProgressionResponse = { snapshot?: Snapshot; message?: string; preview?: ProgressionPreview; error?: string; cardId?: string };
 /** Every screen the app can show; a hash may point at any of them. */
 const TABS = ['home', 'pull', 'collection', 'growth', 'deck', 'battle', 'stats', 'coupon'] as const;
 type Tab = (typeof TABS)[number];
@@ -223,6 +223,27 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
     } finally { inFlight.current = false; setBusy(false); }
   }
 
+  async function reset(confirmation: string) {
+    if (!user || inFlight.current) throw new Error('잠시 후 다시 시도해주세요.');
+    inFlight.current = true;
+    mutation.current += 1;
+    setBusy(true);
+    try {
+      const response = await fetch('/api/account/reset', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirmation })
+      });
+      const data = await response.json() as { snapshot?: Snapshot; error?: string };
+      if (!response.ok || !data.snapshot) throw new Error(data.error || '초기화하지 못했어요. 다시 시도해주세요.');
+      setSnapshot(data.snapshot);
+      setSelected(null);
+      setResults([]);
+      setCount(1);
+      setTicketType('normal');
+      setFilter(defaultFilter);
+      setFeedback(null);
+    } finally { inFlight.current = false; setBusy(false); }
+  }
+
   /**
    * POST /api/progression. 미리보기는 쓰기 없이 소모 대상만 돌려주고, 실패는 Error로 던져
    * 각 패널이 자기 자리에서 보여준다(상세 시트 안에서 전역 배너가 가려지는 일이 없다).
@@ -248,8 +269,17 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
         throw new Error('연결을 확인한 뒤 다시 시도해주세요.');
       }
       if (!ok || !payload) throw new Error(payload?.error || '요청을 처리하지 못했어요. 잠시 후 다시 시도해주세요.');
-      if (payload.snapshot) setSnapshot(payload.snapshot);
-      return { message: payload.message ?? '', preview: payload.preview };
+      if (payload.snapshot) {
+        setSnapshot(payload.snapshot);
+        if (body.action === 'transcend' && payload.cardId) {
+          const next = payload.snapshot.inventory.find((item) => item.cardId === payload.cardId);
+          if (next) {
+            setSelected(next.card);
+            setFilter((current) => ({ ...current, rarity: current.rarity === 'all' ? 'all' : next.rarity }));
+          }
+        }
+      }
+      return { message: payload.message ?? '', preview: payload.preview, cardId: payload.cardId };
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -280,7 +310,7 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
             {tab === 'deck' && <Suspense fallback={<ViewLoading label="덱을 불러오고 있어요." />}><DeckView user={user} decks={snapshot.decks} ownedCardIds={ownedCardIds} cards={allCards} inventory={snapshot.inventory} busy={busy} onDecksChange={handleDecks} onOpenCard={setSelected} onError={reportError} /></Suspense>}
             {tab === 'battle' && <Suspense fallback={<ViewLoading label="대련 준비 중이에요." />}><BattleView user={user} decks={snapshot.decks} cards={allCards} daily={snapshot.daily} unlockedModes={snapshot.unlockedModes} clearedByMode={snapshot.clearedByMode} inventory={snapshot.inventory} onStateChange={refresh} onNavigate={(next) => { if (isTab(next)) navigate(next); }} onOpenCard={setSelected} onError={reportError} /></Suspense>}
             {tab === 'stats' && <StatsView user={user} snapshot={snapshot} cards={allCards} onOpenCard={setSelected} />}
-            {tab === 'coupon' && <CouponView user={user} busy={busy} feedback={feedback} onSubmit={redeem} onNavigate={navigate} />}
+            {tab === 'coupon' && <CouponView user={user} busy={busy} feedback={feedback} onSubmit={redeem} onNavigate={navigate} onReset={reset} />}
           </motion.div>
         </AnimatePresence>
         {feedback && tab !== 'coupon' && <p className={`feedback ${feedback.error ? 'error' : 'success'}`} role={feedback.error ? 'alert' : 'status'}><Icon name={feedback.error ? 'clock' : 'check'} />{feedback.text}</p>}
@@ -466,7 +496,7 @@ function CollectionView({ user, snapshot, cards, catalogCount, ownedBase, filter
   </section>;
 }
 
-function CouponView({ user, busy, feedback, onSubmit, onNavigate }: { user: User; busy: boolean; feedback: Feedback; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onNavigate: (tab: Tab) => void }) {
+function CouponView({ user, busy, feedback, onSubmit, onNavigate, onReset }: { user: User; busy: boolean; feedback: Feedback; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onNavigate: (tab: Tab) => void; onReset: (confirmation: string) => Promise<void> }) {
   return <section className="coupon-view" aria-labelledby="coupon-title">
     <div className="section-head"><div><p className="eyebrow">MORE PULLS. SAME GUY.</p><h1 id="coupon-title">뽑을 핑계, 여기 있습니다.</h1><p>뽑기권이 없어서 못 놀리는 일은 없도록.</p></div></div>
     <div className="coupon-layout">
@@ -489,7 +519,35 @@ function CouponView({ user, busy, feedback, onSubmit, onNavigate }: { user: User
         <p className="coupon-note">받은 뽑기권은 내 계정에 저장됩니다.<br />이미 사용한 쿠폰은 다시 사용할 수 없어요.</p>
       </div>
     </div>
+    {user && <AccountReset busy={busy} onReset={onReset} />}
   </section>;
+}
+
+function AccountReset({ busy, onReset }: { busy: boolean; onReset: (confirmation: string) => Promise<void> }) {
+  const [confirmation, setConfirmation] = useState('');
+  const [notice, setNotice] = useState<Feedback>(null);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || confirmation !== '초기화') return;
+    setNotice(null);
+    try {
+      await onReset(confirmation);
+      setConfirmation('');
+      setNotice({ text: '게임 데이터를 초기화했어요. 쿠폰과 무료 뽑기를 다시 사용할 수 있어요.', error: false });
+    } catch (error) {
+      setNotice({ text: error instanceof Error ? error.message : '연결을 확인한 뒤 다시 시도해주세요.', error: true });
+    }
+  }
+  return <details className="account-reset">
+    <summary>계정 초기화</summary>
+    <p>내 카드·강화·특성, 재료, 뽑기권, 덱, 전투·뽑기 기록과 쿠폰 사용 내역이 모두 삭제됩니다. 로그인 계정은 유지되며, 삭제한 게임 데이터는 되돌릴 수 없습니다.</p>
+    <form onSubmit={submit}>
+      <label htmlFor="reset-confirmation">계속하려면 ‘초기화’를 입력하세요.</label>
+      <input id="reset-confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" disabled={busy} />
+      <button className="btn btn-primary" disabled={busy || confirmation !== '초기화'}>내 게임 데이터 초기화</button>
+    </form>
+    {notice && <p className={`feedback ${notice.error ? 'error' : 'success'}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
+  </details>;
 }
 
 /** Opens once, plays the stored event log back, and closes with the sheet. */

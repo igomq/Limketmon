@@ -44,7 +44,7 @@ export type ProgressionRequest =
   | { action: 'transcend'; cardId: string; traitId: TraitId }
   | { action: 'fuse'; cards: SpentCards; count: 2 | 3 }
   | { action: 'remove-trait'; cardId: string; traitId: TraitId; expectedTraits?: string };
-export type ProgressionReply = { message: string; preview?: ProgressionPreview };
+export type ProgressionReply = { message: string; preview?: ProgressionPreview; cardId?: string };
 /** Owner of the request state: posts to /api/progression and refreshes the snapshot. Throws on refusal. */
 export type RunProgression = (body: ProgressionRequest, options?: { preview?: boolean }) => Promise<ProgressionReply>;
 
@@ -240,14 +240,14 @@ function FusePanel({ rows, run, busy, onPending, onNote }: {
       for (const pick of current) {
         const row = pool.find((item) => item.cardId === pick.cardId);
         if (!row || total >= count) continue;
-        const quantity = Math.max(1, Math.min(pick.quantity, row.quantity, count - total));
+        const quantity = Math.max(1, Math.min(pick.quantity, minEnhance > 0 ? 1 : row.quantity, count - total));
         next.push({ cardId: pick.cardId, quantity });
         total += quantity;
       }
       const same = next.length === current.length && next.every((pick, index) => pick.cardId === current[index]!.cardId && pick.quantity === current[index]!.quantity);
       return same ? current : next;
     });
-  }, [pool, count]);
+  }, [pool, count, minEnhance]);
 
   const total = picks.reduce((sum, pick) => sum + pick.quantity, 0);
   const picked = picks.flatMap((pick) => {
@@ -273,7 +273,7 @@ function FusePanel({ rows, run, busy, onPending, onNote }: {
       const others = current.reduce((sum, pick) => sum + (pick.cardId === row.cardId ? 0 : pick.quantity), 0);
       return current.map((pick) => {
         if (pick.cardId !== row.cardId) return pick;
-        const cap = Math.max(1, Math.min(row.quantity, count, count - others));
+        const cap = Math.max(1, Math.min(minEnhance > 0 ? 1 : row.quantity, count, count - others));
         const quantity = Math.max(1, Math.min(cap, pick.quantity + delta));
         return quantity === pick.quantity ? pick : { ...pick, quantity };
       });
@@ -325,7 +325,7 @@ function FusePanel({ rows, run, busy, onPending, onNote }: {
 
       <p className="fuse-target" role="status">
         <Icon name={legal ? 'sparkle' : 'clock'} />{rarity} 재료 {count}장 → <strong>{targetText}</strong>
-        {minEnhance > 0 && <span> · 재료는 각 +{minEnhance} 이상이어야 해요</span>}
+        {minEnhance > 0 && <span> · 각 +{minEnhance} 이상인 본체 1장씩 필요해요 (중복 재료는 +0)</span>}
       </p>
 
       {pool.length ? (
@@ -353,7 +353,7 @@ function FusePanel({ rows, run, busy, onPending, onNote }: {
                   <div className="fuse-count" role="group" aria-label={`${cardTitle(row.card)} 재료 수량`}>
                     <button className="fuse-step" disabled={busy || chosenCount <= 1} onClick={() => bump(row, -1)} aria-label="한 장 줄이기">−</button>
                     <span aria-live="polite">{chosenCount}장</span>
-                    <button className="fuse-step" disabled={busy || total >= count || chosenCount >= Math.min(row.quantity, count)} onClick={() => bump(row, 1)} aria-label="한 장 더 넣기">+</button>
+                    <button className="fuse-step" disabled={busy || total >= count || chosenCount >= Math.min(minEnhance > 0 ? 1 : row.quantity, count)} onClick={() => bump(row, 1)} aria-label="한 장 더 넣기">+</button>
                   </div>
                 ) : (
                   <span className="fuse-meta">{tooLow ? `+${minEnhance} 필요` : sameKind ? '다른 기본 종류 필요' : `보유 ${row.quantity}장`}</span>
@@ -790,7 +790,7 @@ export function TranscendPanel({ card, row, materials, run, busy }: {
     <section className="transcend-panel" aria-labelledby={`transcend-title-${row.cardId}`}>
       <span className="eyebrow">TRANSCEND</span>
       <h3 id={`transcend-title-${row.cardId}`}>초월</h3>
-      <p className="transcend-intro">한 번에 1장만 초월합니다. 선택한 특성만 초월하고, 강화 단계와 다른 특성은 그대로 남습니다.</p>
+      <p className="transcend-intro">본체 1장만 초월합니다. 강화 단계와 특성은 초월 카드로 옮겨가고, 남은 재료는 +0·특성 없음으로 남습니다.</p>
       <ul className="transcend-conditions">
         <li data-met={!capped}><Icon name={capped ? 'clock' : 'check'} />등급 여유<span>{capped ? 'XR은 더 올릴 수 없어요' : `${card.rarity} → ${target}`}</span></li>
         <li data-met={enhanced}><Icon name={enhanced ? 'check' : 'clock'} />강화 +5 이상<span>현재 +{row.enhanceLevel}</span></li>
@@ -824,7 +824,7 @@ export function TranscendPanel({ card, row, materials, run, busy }: {
               <li><span>등급</span><strong>{card.rarity} → {target}</strong></li>
               <li><span>쌍둥이 임신의 증거</span><strong>-1</strong></li>
             </ul>
-            <p className="confirm-note">강화 +{row.enhanceLevel}과 다른 특성{row.traits.filter((trait) => trait.id !== chosen).length ? ` (${row.traits.filter((trait) => trait.id !== chosen).map((trait) => TRAIT_LABEL[trait.id]).join(' · ')})` : ''}은 그대로 유지됩니다.</p>
+            <p className="confirm-note">강화 +{row.enhanceLevel}과 다른 특성{row.traits.filter((trait) => trait.id !== chosen).length ? ` (${row.traits.filter((trait) => trait.id !== chosen).map((trait) => TRAIT_LABEL[trait.id]).join(' · ')})` : ''}은 새 초월 카드에 유지됩니다. 남은 재료는 +0·특성 없음입니다.</p>
           </ConfirmSheet>
         )}
       </AnimatePresence>

@@ -349,9 +349,6 @@ export interface CouponGrant {
   copiesPerCard?: number;
 }
 
-/** Copies of every catalog card the private card coupon writes per redemption. */
-const CARD_COUPON_COPIES = 100;
-
 /** Case-insensitive once-per-user coupons. The 100-p coupons grant 20 guaranteed tickets each. */
 const COUPONS: Record<string, CouponGrant> = {
   LIMKETMON: { credits: 10, low: 50, sr: 0, ssr: 1 },
@@ -359,12 +356,7 @@ const COUPONS: Record<string, CouponGrant> = {
   LIMKETMON_SSR_100P: { credits: 0, low: 0, sr: 0, ssr: 20 }
 };
 
-/**
- * Server-only secret coupon: repeatable, grants every catalog card x100, keeps existing enhancement,
- * writes no redemption row so it stays usable. The code itself lives only in the PRIVATE_CARD_COUPON
- * runtime secret (never in source, tests or docs). Absent or blank secret disables this route, so
- * ordinary public coupons keep working unchanged.
- */
+/** Repeatable server-only test coupon. The code lives in the runtime secret, never the client. */
 function privateCouponCode(): string {
   return (env.PRIVATE_CARD_COUPON ?? '').trim().toUpperCase();
 }
@@ -373,49 +365,15 @@ export async function redeemCoupon(userId: string, rawCode: string): Promise<{ s
   const code = rawCode.trim().toUpperCase();
   const db = getDatabase();
   const secret = privateCouponCode();
-  if (secret && code === secret) {
-    const now = new Date().toISOString();
-    // One transaction: read the inventory, write every catalog row, read it back. The receipt is the
-    // difference the database actually shows, so the coupon can never report a grant it did not make.
-    const batchResults = await db.batch([
-      db.prepare('SELECT card_id, quantity FROM inventory WHERE user_id = ?').bind(userId),
-      ...cards.map((card) => db.prepare(`INSERT INTO inventory (user_id, card_id, quantity, first_obtained_at)
-        VALUES (?, ?, ?, ?) ON CONFLICT(user_id, card_id) DO UPDATE SET quantity = quantity + ?`)
-        .bind(userId, card.id, CARD_COUPON_COPIES, now, CARD_COUPON_COPIES)),
-      db.prepare('SELECT card_id, quantity FROM inventory WHERE user_id = ?').bind(userId)
-    ]);
-    const beforeResult = batchResults[0]!;
-    const afterResult = batchResults[batchResults.length - 1]!;
-    const before = new Map(
-      (beforeResult.results as Array<{ card_id: string; quantity: number }>).map(
-        (row) => [row.card_id, Number(row.quantity)] as [string, number]
-      )
-    );
-    const added = (afterResult.results as Array<{ card_id: string; quantity: number }>)
-      .map((row) => Number(row.quantity) - (before.get(row.card_id) ?? 0))
-      .filter((delta) => delta > 0);
-    const cardTypes = added.length;
-    return {
-      snapshot: await getSnapshot(userId),
-      granted: {
-        credits: 0,
-        low: 0,
-        sr: 0,
-        ssr: 0,
-        cards: added.reduce((sum, delta) => sum + delta, 0),
-        cardTypes,
-        copiesPerCard: cardTypes && added.every((delta) => delta === added[0]) ? added[0]! : 0
-      }
-    };
-  }
-  const grant = COUPONS[code];
+  const isPrivate = Boolean(secret && code === secret);
+  const grant = isPrivate ? { credits: 100, low: 100, sr: 100, ssr: 100 } : Object.hasOwn(COUPONS, code) ? COUPONS[code] : undefined;
   if (!grant) throw new GameError('invalid_code', '유효하지 않은 쿠폰 코드입니다.');
   try {
     await db.batch([
-      db.prepare(`
+      ...(isPrivate ? [] : [db.prepare(`
         INSERT INTO coupon_redemptions (user_id, coupon_code, redeemed_at)
         VALUES (?, ?, ?)
-      `).bind(userId, code, new Date().toISOString()),
+      `).bind(userId, code, new Date().toISOString())]),
       db.prepare(`
         UPDATE user_game_state SET
           pull_credits = pull_credits + ?,
@@ -433,8 +391,20 @@ export async function redeemCoupon(userId: string, rawCode: string): Promise<{ s
     throw error;
   }
 
-  // These exact increments committed behind the coupon uniqueness gate.
+  // These exact increments committed together; private test grants are repeatable.
   return { snapshot: await getSnapshot(userId), granted: { ...grant } };
+}
+
+/** Clear this player's game data atomically while keeping their sign-in identity. */
+export async function resetAccount(userId: string): Promise<Snapshot> {
+  const db = getDatabase();
+  await db.batch([
+    db.prepare('DELETE FROM deck_cards WHERE deck_id IN (SELECT id FROM decks WHERE user_id = ?)').bind(userId),
+    ...['decks', 'inventory', 'pull_history', 'battles', 'user_achievements', 'reward_claims', 'coupon_redemptions', 'user_game_state']
+      .map((table) => db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).bind(userId)),
+    db.prepare('INSERT INTO user_game_state (user_id) VALUES (?)').bind(userId)
+  ]);
+  return getSnapshot(userId);
 }
 
 export async function enhanceCard(userId: string, rawCardId: unknown): Promise<Snapshot> {
@@ -1060,6 +1030,8 @@ export async function finishBattle(
 
   try {
     await db.batch([
+      // A reset may have deleted this battle while the simulation was running.
+      progressionGuard(db, userId, "EXISTS (SELECT 1 FROM battles WHERE id = ? AND user_id = ? AND result = 'pending')", [battleId, userId]),
       // Settlement lock: exactly one request can ever insert this key, and because a D1 batch is
       // one transaction, a loser's whole payout rolls back instead of paying a second time.
       db.prepare('INSERT INTO reward_claims (user_id, claim_key, credits, battle_id, claimed_at) VALUES (?, ?, 0, ?, ?)')
