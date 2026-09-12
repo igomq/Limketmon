@@ -36,6 +36,8 @@ export interface CardProgress {
 export const MAX_TRAIT_LEVEL = 20;
 /** A card carries at most two different traits. */
 export const MAX_TRAITS = 2;
+/** After any transcend, one extra trait slot opens. */
+export const MAX_TRAITS_TRANSCENDED = 3;
 /** Highest resistance a single resist trait reaches (20 + transcend = 70%). */
 export const MAX_RESIST = 0.7;
 
@@ -82,7 +84,7 @@ export function traitCost(rarity: Rarity, level: number): number {
 export function traitValue(trait: Trait): number {
   const level = clampTraitLevel(trait.level);
   const percent = level + Math.floor(level / 5) * 5;
-  return (percent / 100) * (trait.transcended ? 1.75 : 1);
+  return (percent / 100) * (trait.transcended ? 2 : 1);
 }
 
 /** Stored traits are JSON. Unknown ids, duplicates and out-of-range levels are dropped, not thrown. */
@@ -98,7 +100,7 @@ export function parseTraits(raw: unknown): Trait[] {
   if (!Array.isArray(value)) return [];
   const traits: Trait[] = [];
   for (const item of value) {
-    if (traits.length >= MAX_TRAITS) break;
+    if (traits.length >= MAX_TRAITS_TRANSCENDED) break;
     if (!item || typeof item !== 'object') continue;
     const row = item as { id?: unknown; level?: unknown; transcended?: unknown; spentProof?: unknown; refundEstimated?: unknown };
     if (typeof row.id !== 'string' || !TRAIT_ID_SET.has(row.id)) continue;
@@ -111,7 +113,12 @@ export function parseTraits(raw: unknown): Trait[] {
       ...(typeof row.refundEstimated === 'boolean' ? { refundEstimated: row.refundEstimated } : {})
     });
   }
-  return traits;
+  return traits.some((trait) => trait.transcended) ? traits : traits.slice(0, MAX_TRAITS);
+}
+
+/** 2 slots until a card has transcended at least once, then 3. */
+export function traitSlotLimit(traits: readonly Trait[]): number {
+  return traits.some((trait) => trait.transcended) ? MAX_TRAITS_TRANSCENDED : MAX_TRAITS;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,8 +174,12 @@ export function fusionMinEnhance(rarity: Rarity, count: 2 | 3): number {
 
 export const MIN_TRANSCEND_ENHANCE = 5;
 export const MIN_TRANSCEND_TRAIT_LEVEL = 10;
-/** Twin-Proof evidence consumed per transcendence. */
-export const TWIN_PROOF_COST = 1;
+/** Twin-Proof cost by the card's current (possibly already transcended) rarity. */
+const TWIN_PROOF_COST_BY_RARITY: Record<Rarity, number> = { N: 1, R: 2, SR: 3, SSR: 4, UR: 5, XR: 5 };
+
+export function twinProofCost(rarity: Rarity): number {
+  return TWIN_PROOF_COST_BY_RARITY[rarity];
+}
 
 /** One rarity step, +5 enhance, a non-transcended trait at +10, and a card below XR. */
 export function canTranscend(progress: CardProgress, traitId: TraitId): boolean {

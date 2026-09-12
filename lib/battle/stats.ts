@@ -7,7 +7,7 @@ import { ELEMENTS, type CardBattleStats, type Element } from './types.ts';
 import { enhancePower } from '../enhance.ts';
 import manifest from '../data/cards.curated.json';
 
-export const STAT_RULESET = 3;
+export const STAT_RULESET = 4;
 
 /** Base cards sit at 70% of catalog attack/defense so enhance has room to climb. */
 const BASE_STAT_SCALE = 0.7;

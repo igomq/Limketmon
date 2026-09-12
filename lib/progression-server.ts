@@ -2,7 +2,7 @@ import 'server-only';
 import { getDatabase } from '../db/index';
 import { cards as catalog, GameError, getSnapshot, ownedRows, progressOf, type OwnedRow, ownedRowGuard, progressionGuard } from './game';
 import { RARITY_ORDER, type Rarity } from './rules';
-import { TRAIT_IDS, MAX_TRAIT_LEVEL, traitCost, nextRarity, dismantleReward, fragmentChance, fusionRarity, fusionMinEnhance, type TraitId, type CardProgress, type Trait } from './progression';
+import { TRAIT_IDS, MAX_TRAIT_LEVEL, traitCost, nextRarity, dismantleReward, fragmentChance, fusionRarity, fusionMinEnhance, traitSlotLimit, twinProofCost, type TraitId, type CardProgress, type Trait } from './progression';
 
 type Selection = { cardId: string; quantity: number };
 const fail = (message: string): never => { throw new GameError('invalid_progression', message); };
@@ -140,7 +140,7 @@ export async function applyProgression(userId: string, raw: unknown) {
       message = `특성을 제거하고 임신의 증거 ${proof}개를 환급했어요.`;
     } else if (action === 'trait') {
       if (body.preview) return fail('이 작업은 미리보기를 지원하지 않습니다.');
-      if ((!existing && progress.traits.length >= 2) || (existing && existing.level >= MAX_TRAIT_LEVEL)) return fail('더 강화할 수 없는 특성입니다.');
+      if ((!existing && progress.traits.length >= traitSlotLimit(progress.traits)) || (existing && existing.level >= MAX_TRAIT_LEVEL)) return fail('더 강화할 수 없는 특성입니다.');
       const cost = traitCost(progress.rarity, existing?.level ?? 0);
       guard(row);
       writes.push(db.prepare('UPDATE user_game_state SET proof = proof - ? WHERE user_id = ?').bind(cost, userId));
@@ -155,9 +155,10 @@ export async function applyProgression(userId: string, raw: unknown) {
     } else {
       const rarity = nextRarity(progress.rarity);
       if (!rarity || progress.enhanceLevel < 5 || !existing || existing.level < 10 || existing.transcended) return fail('초월 조건이 맞지 않습니다.');
-      if (body.preview) return { preview: { cards: [{ cardId: row.card_id, quantity: 1 }], proof: 0, minFragments: 0, warning: '본체의 강화·특성은 초월 카드로 옮겨가고, 남은 재료는 +0·특성 없음으로 남습니다. 쌍둥이 임신의 증거 1개를 소비합니다.' } };
+      const twinCost = twinProofCost(progress.rarity);
+      if (body.preview) return { preview: { cards: [{ cardId: row.card_id, quantity: 1 }], proof: 0, minFragments: 0, warning: `본체의 강화·특성은 초월 카드로 옮겨가고, 남은 재료는 +0·특성 없음으로 남습니다. 쌍둥이 임신의 증거 ${twinCost}개를 소비합니다.` } };
       guard(row);
-      writes.push(db.prepare('UPDATE user_game_state SET twin_proof = twin_proof - 1 WHERE user_id = ?').bind(userId));
+      writes.push(db.prepare('UPDATE user_game_state SET twin_proof = twin_proof - ? WHERE user_id = ?').bind(twinCost, userId));
       for (const trait of progress.traits) initializeSpending(trait, progress);
       cardId = insert({ ...progress, rarity, traits: progress.traits.map((trait) => ({
         ...trait,

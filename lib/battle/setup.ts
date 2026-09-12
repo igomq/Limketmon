@@ -115,8 +115,18 @@ export function opponentTeam(opponentId: string, mode: BattleMode = 'normal'): C
   const opponent = opponentById(opponentId, mode);
   if (!opponent) throw new SetupError(`unknown opponent: ${opponentId}`);
   const statScale = opponent.statScale ?? 1;
-  return opponent.cards.map((cardId) => {
-    const seed = combatantSeed(cardId, opponent.hpScale);
+  return opponent.cards.map((cardId, index) => {
+    const grown = opponent.loadout?.[index];
+    const catalog = CARD_BY_ID.get(grown?.cardId ?? cardId);
+    const progress = grown && catalog
+      ? {
+        baseCardId: catalog.baseCardId ?? catalog.id,
+        rarity: grown.rarity ?? catalog.rarity,
+        enhanceLevel: grown.enhance,
+        traits: (grown.traits ?? []).map((trait) => ({ ...trait }))
+      }
+      : undefined;
+    const seed = combatantSeed(grown?.cardId ?? cardId, opponent.hpScale, grown?.enhance ?? 0, progress);
     if (statScale === 1) return seed;
     return {
       ...seed,

@@ -75,7 +75,7 @@ test('battles are server-authoritative: ownership, verification, first-clear rew
   const first = await game.finishBattle(USER, setup.battleId, played.decisions, DAY);
   const win = { battleId: setup.battleId, decisions: played.decisions, summary: first };
   assert.equal(win.summary.result, 'won', 'a common deck can beat the beginner opponent');
-  assert.equal(win.summary.rewards.filter((line) => line.ticketType === 'low').reduce((sum, line) => sum + (line.quantity ?? 0), 0), 4, 'win and first clear each pay two low tickets');
+  assert.equal(win.summary.rewards.filter((line) => line.ticketType === 'low').reduce((sum, line) => sum + (line.quantity ?? 0), 0), 2, 'win and first clear each pay one low ticket');
   assert.equal(win.summary.mvpCardId !== null && owned.includes(win.summary.mvpCardId), true, 'MVP is one of the deployed cards');
   assert.ok(win.summary.damageDealt > 0);
   assert.ok(win.summary.rounds > 0);
@@ -89,7 +89,7 @@ test('battles are server-authoritative: ownership, verification, first-clear rew
   // A repeat win against the same opponent pays no first-clear reward.
   const second = await game.startBattle(USER, { deckId: decks[0]!.id, opponentId: 'rookie' }, DAY);
   const repeat = await game.finishBattle(USER, second.battleId, play(USER, second).decisions, DAY);
-  assert.equal(repeat.rewards.filter((line) => line.ticketType === 'low').reduce((sum, line) => sum + (line.quantity ?? 0), 0), 2);
+  assert.equal(repeat.rewards.filter((line) => line.ticketType === 'low').reduce((sum, line) => sum + (line.quantity ?? 0), 0), 1);
   assert.equal(await creditsOf(USER), sumRewards(win.summary) + sumRewards(repeat));
 });
 

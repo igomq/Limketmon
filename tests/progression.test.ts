@@ -292,7 +292,7 @@ test('the win ticket follows the battle mode', () => {
     { kind: 'pve', opponentId: 'ace', mode: 'chaos', result: 'won', kstDate: '2026-09-10', firstClear: false, battleId: 'c1' },
     9
   );
-  assert.deepEqual(chaosAce.claims, [{ key: 'ticket:c1', credits: 0, ticketType: 'ssr', quantity: 2 }]);
+  assert.deepEqual(chaosAce.claims, [{ key: 'ticket:c1', credits: 0, ticketType: 'ssr', quantity: 1 }]);
 });
 
 test('a daily win pays three credits with the day claim key and no ticket', () => {

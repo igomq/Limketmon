@@ -38,18 +38,18 @@ test('enhanceMaterials keeps one base copy and canEnhance agrees at the boundari
 });
 
 test('enhancePower hits the documented landmarks within 15% and grows strictly', () => {
-  // N/R still share the old bands. SR/SSR/UR sit 3/6/10% above them; XR is UR * 1.35.
+  // Level-0 bands keep the rarity self-buff; +1..+4 are flattened and +15 ends below the old cap.
   const near = (left: number, right: number, label: string) => {
     assert.ok(Math.abs(left - right) / right <= 0.15, `${label}: ${left} vs ${right}`);
   };
-  near(enhancePower('N', 5), enhancePower('R', 3), 'N5~R3');
-  near(enhancePower('N', 5), 1.55, 'N5~old SR0');
   near(enhancePower('SR', 0), 1.55 * 1.03, 'SR0 is +3%');
-  assert.equal(enhancePower('N', 10), 2.4);
-  assert.equal(enhancePower('R', 5), 2.075);
   near(enhancePower('SSR', 0), 2.4 * 1.06, 'SSR0 is +6%');
   near(enhancePower('UR', 0), 3.55 * 1.1, 'UR0 is +10%');
-  near(enhancePower('XR', 0), enhancePower('UR', 0) * 1.35, 'XR is UR*1.35');
+  near(enhancePower('XR', 0), enhancePower('UR', 0) * 1.45, 'XR is UR*1.45');
+  const oldN = (level: number) => 1 + 0.08 * level + 0.006 * level * level;
+  assert.ok(enhancePower('N', 4) < oldN(4));
+  assert.ok(Math.abs((enhancePower('N', 5) - enhancePower('N', 4)) - (oldN(5) - oldN(4))) < 1e-12);
+  assert.ok(enhancePower('N', 15) < oldN(15));
   assert.ok(enhancePower('SR', 0) > 1.55);
   assert.ok(enhancePower('SSR', 0) > 2.4);
   assert.ok(enhancePower('UR', 0) > 3.55);

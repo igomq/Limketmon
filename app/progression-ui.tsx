@@ -16,6 +16,7 @@ import {
   fusionRarity,
   nextRarity,
   traitCost,
+  traitSlotLimit,
   traitValue,
   type Trait,
   type TraitId
@@ -515,7 +516,8 @@ export function TraitPanel({ card, row, materials, run, busy }: {
   /** The server's own removal preview, held so the confirm sheet shows no guessed refund. */
   const [removal, setRemoval] = useState<{ traitId: TraitId; preview: ProgressionPreview } | null>(null);
   const working = busy || pending !== null;
-  const openSlots = Math.max(0, 2 - row.traits.length);
+  const slots = traitSlotLimit(row.traits);
+  const openSlots = Math.max(0, slots - row.traits.length);
   const available = TRAIT_IDS.filter((id) => !row.traits.some((trait) => trait.id === id));
 
   async function apply(traitId: TraitId) {
@@ -571,9 +573,9 @@ export function TraitPanel({ card, row, materials, run, busy }: {
 
   return (
     <section className="trait-panel" aria-labelledby={`trait-title-${row.cardId}`}>
-      <span className="eyebrow">TRAITS · {row.traits.length} / 2</span>
+      <span className="eyebrow">TRAITS · {row.traits.length} / {slots}</span>
       <h3 id={`trait-title-${row.cardId}`}>특성</h3>
-      <p className="trait-intro">서로 다른 특성을 최대 2개까지. 선택하면 첫 +1 비용이 바로 차감되고, 5레벨마다 효과가 크게 오릅니다.</p>
+      <p className="trait-intro">서로 다른 특성을 최대 {slots}개까지. 초월하면 슬롯이 하나 더 열립니다. 선택하면 첫 +1 비용이 바로 차감되고, 5레벨마다 효과가 크게 오릅니다.</p>
       {row.traits.length ? (
         <ul className="trait-list">
           {row.traits.map((trait) => {

@@ -52,7 +52,7 @@ test('difficulty modes unlock server-side: 5 normal opens hard, 5 hard opens cha
   await assert.rejects(game.startBattle(USER, { deckId: deck.id, opponentId: 'rookie', mode: 'hard' }, DAY), /잠겨/);
   const locked = await game.getSnapshot(USER, DAY);
   assert.deepEqual(locked.unlockedModes, ['normal']);
-  assert.deepEqual(locked.clearedByMode, { normal: [], hard: [], chaos: [] });
+  assert.deepEqual(locked.clearedByMode, { normal: [], hard: [], chaos: [], extreme: [] });
 
   grantFirstClears('normal');
   const hardOpen = await game.getSnapshot(USER, DAY);
@@ -82,8 +82,8 @@ test('mode difficulty scales HP/ATK/DEF and first-clear credits (1x/2x/4x)', () 
   const chaos = opponentById('boss', 'chaos');
   assert.ok(base);
   assert.ok(Math.abs((base.statScale ?? 0) - 1.06 * 1.2) < 1e-9, 'normal boss is +20% on the 1.06 band');
-  assert.ok(Math.abs((hard!.statScale ?? 0) - 1.5 * 0.92) < 1e-9, 'hard boss is pulled back');
-  assert.equal(chaos!.statScale, 2.1, 'chaos raises stats');
+  assert.ok(Math.abs((hard!.statScale ?? 0) - 1.62 * 0.92) < 1e-9, 'hard boss is pulled back');
+  assert.ok(Math.abs((chaos!.statScale ?? 0) - 2.18 * 1.04) < 1e-9, 'chaos boss rises less than general stages');
   assert.equal(hard!.reward.credits, base!.reward.credits * 2);
   assert.equal(chaos!.reward.credits, base!.reward.credits * 4);
   assert.ok(hard!.hpScale > base!.hpScale && chaos!.hpScale > hard!.hpScale);
@@ -160,9 +160,9 @@ test('coupon codes grant their fixed bundles, once, case-insensitively', async (
 
 test('the win ticket is fixed per mode and opponent', () => {
   // Normal pays low tickets for the lower opponents and normal tickets for ace/boss.
-  assert.deepEqual(victoryTicketReward('normal', 'rookie'), { ticketType: 'low', quantity: 2 });
-  assert.deepEqual(victoryTicketReward('normal', 'regular'), { ticketType: 'low', quantity: 3 });
-  assert.deepEqual(victoryTicketReward('normal', 'veteran'), { ticketType: 'low', quantity: 4 });
+  assert.deepEqual(victoryTicketReward('normal', 'rookie'), { ticketType: 'low', quantity: 1 });
+  assert.deepEqual(victoryTicketReward('normal', 'regular'), { ticketType: 'low', quantity: 2 });
+  assert.deepEqual(victoryTicketReward('normal', 'veteran'), { ticketType: 'low', quantity: 3 });
   assert.deepEqual(victoryTicketReward('normal', 'ace'), { ticketType: 'normal', quantity: 2 });
   assert.deepEqual(victoryTicketReward('normal', 'boss'), { ticketType: 'normal', quantity: 3 });
   // Hard pays normal tickets, and an SR+ pair for the boss.
@@ -175,36 +175,38 @@ test('the win ticket is fixed per mode and opponent', () => {
   assert.deepEqual(victoryTicketReward('chaos', 'rookie'), { ticketType: 'sr', quantity: 2 });
   assert.deepEqual(victoryTicketReward('chaos', 'regular'), { ticketType: 'sr', quantity: 3 });
   assert.deepEqual(victoryTicketReward('chaos', 'veteran'), { ticketType: 'sr', quantity: 4 });
-  assert.deepEqual(victoryTicketReward('chaos', 'ace'), { ticketType: 'ssr', quantity: 2 });
-  assert.deepEqual(victoryTicketReward('chaos', 'boss'), { ticketType: 'ssr', quantity: 3 });
+  assert.deepEqual(victoryTicketReward('chaos', 'ace'), { ticketType: 'ssr', quantity: 1 });
+  assert.deepEqual(victoryTicketReward('chaos', 'boss'), { ticketType: 'ssr', quantity: 2 });
+  assert.deepEqual(victoryTicketReward('extreme', 'boss', 'ssr'), { ticketType: 'ssr', quantity: 2 });
+  assert.deepEqual(victoryTicketReward('extreme', 'rookie', 'sr'), { ticketType: 'sr', quantity: 3 });
 });
 
 test('every win pays its ticket and the first clear pays it once more', async () => {
   reset();
   const deck = await makeStrongDeck('보상 덱');
 
-  // Normal rookie: low x2 every win, plus low x2 extra on the first clear → two lines, 4 total.
+  // Normal rookie: low x1 every win, plus low x1 extra on the first clear → two lines, 2 total.
   const win = await winOnce(deck.id, 'rookie');
   const lines = win.summary.rewards.filter((line) => line.ticketType === 'low');
-  assert.equal(lines.reduce((sum, line) => sum + (line.quantity ?? 0), 0), 4, 'first rookie clear: 2 win + 2 first-clear extra');
+  assert.equal(lines.reduce((sum, line) => sum + (line.quantity ?? 0), 0), 2, 'first rookie clear: 1 win + 1 first-clear extra');
   assert.equal(lines.every((line) => line.credits === 0), true, 'a ticket line never pays credits');
-  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 4, sr: 0, ssr: 0 });
+  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 2, sr: 0, ssr: 0 });
 
   // The per-battle win payout claim and the returned receipt agree.
   const claim = await claimOf(win.battleId);
   assert.equal(claim?.ticket_type, 'low');
-  assert.equal(Number(claim?.ticket_quantity), 2);
+  assert.equal(Number(claim?.ticket_quantity), 1);
   assert.equal(Number(claim?.credits), 0);
 
   // A repeat win pays only the win ticket.
   const repeat = await winOnce(deck.id, 'rookie');
   assert.equal(repeat.summary.rewards.filter((line) => line.label === '첫 격파 보상').length, 0);
-  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 6, sr: 0, ssr: 0 });
+  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 3, sr: 0, ssr: 0 });
 
   // Re-settling the first battle returns the identical receipt and mints nothing.
   const again = await game.finishBattle(USER, win.battleId, win.decisions, DAY);
   assert.deepEqual(again, win.summary);
-  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 6, sr: 0, ssr: 0 });
+  assert.deepEqual((await game.getSnapshot(USER, DAY)).tickets, { low: 3, sr: 0, ssr: 0 });
 });
 
 test('concurrent distinct battles competing for same daily/first-clear pay exactly one winner', async () => {
@@ -341,7 +343,7 @@ test('progress reads stay bounded to known keys, indexed, and correct after many
   }
 
   assert.ok(seen.length > 0, 'the snapshot reads claims through the bounded IN query');
-  for (const call of seen) assert.ok(call.bindings.length <= 25, `bounded to ${call.bindings.length} bindings`);
+  for (const call of seen) assert.ok(call.bindings.length <= 40, `bounded to ${call.bindings.length} bindings`);
   const plan = db.prepare(`EXPLAIN QUERY PLAN ${seen[0]!.query}`).all(...seen[0]!.bindings) as { results: Array<{ detail: string }> };
   const detail = plan.results.map((row) => row.detail).join(' | ');
   assert.match(detail, /SEARCH reward_claims USING (COVERING )?INDEX sqlite_autoindex_reward_claims_1/);

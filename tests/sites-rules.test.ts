@@ -58,7 +58,8 @@ test('every pull table sums to exactly one', () => {
 test('guaranteed tickets normalise the base weights among the allowed rarities', () => {
   // SR+ renormalises SR/SSR/UR = 0.1/0.019/0.001 → cumulative 0.8333 / 0.9917 / 1.
   assert.equal(rollGuaranteedRarity(0.8, 'SR'), 'SR');
-  assert.equal(rollGuaranteedRarity(0.9, 'SR'), 'SSR');
+  assert.equal(rollGuaranteedRarity(0.93, 'SR'), 'SR');
+  assert.equal(rollGuaranteedRarity(0.95, 'SR'), 'SSR');
   assert.equal(rollGuaranteedRarity(0.9999, 'SR'), 'UR');
   // SSR+ renormalises SSR/UR = 0.019/0.001 → 0.95 / 1.
   assert.equal(rollGuaranteedRarity(0.9, 'SSR'), 'SSR');
@@ -67,4 +68,3 @@ test('guaranteed tickets normalise the base weights among the allowed rarities',
     assert.ok(['SR', 'SSR', 'UR'].includes(rollGuaranteedRarity(unit, 'SR')));
   }
 });
-

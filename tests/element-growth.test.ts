@@ -287,13 +287,13 @@ test('links: a same-element follow-up never links, and poison neither marks nor 
 // Traits
 // ---------------------------------------------------------------------------
 
-test('traits: value is level*1% + 5% per 5 levels, doubled down on at 20, x1.75 when transcended', () => {
+test('traits: value is level*1% + 5% per 5 levels, doubled down on at 20, x2 when transcended', () => {
   assert.equal(MAX_TRAIT_LEVEL, 20);
   assert.equal(traitValue(trait('damage', 4)), 0.04);
   assert.equal(traitValue(trait('damage', 5)), 0.1);
   assert.equal(traitValue(trait('damage', 19)), 0.34);
   assert.ok(Math.abs(traitValue(trait('damage', 20)) - 0.4) < 1e-9);
-  assert.ok(Math.abs(traitValue(trait('damage', 20, true)) - 0.7) < 1e-9);
+  assert.ok(Math.abs(traitValue(trait('damage', 20, true)) - 0.8) < 1e-9);
   assert.equal(traitValue(trait('damage', 0)), 0);
 });
 
@@ -310,7 +310,7 @@ test('traits: resist cuts only its own element and caps at 70%', () => {
   const capped = hit({ element: 'fire' }, { traits: [trait('resist_fire', 20, true)] }, 61);
   assert.ok(Math.abs(resisted.amount / plain.amount - 0.6) < 0.02);
   assert.equal(other.amount, plain.amount);
-  // 0.4 x 1.75 = 0.70, exactly the cap: the hit keeps 30%.
+  // 0.4 x 2 = 0.80, then resist caps at 70%: the hit keeps 30%.
   assert.ok(Math.abs(capped.amount / plain.amount - 0.3) < 0.02, `${capped.amount} vs ${plain.amount}`);
 });
 
@@ -412,13 +412,13 @@ test('promoted cards keep original shape and rise exactly once', () => {
   const ur = cardById('imsingyu-v033');
   const xr = battleStats(effectiveCard(ur, 'owned-xr-shape', 'XR'));
   const urStats = battleStats(ur);
-  assert.ok(Math.abs(xr.atk / urStats.atk - 1.35) < 0.08, `UR->XR atk ${xr.atk / urStats.atk}`);
+  assert.ok(Math.abs(xr.atk / urStats.atk - 1.45) < 0.08, `UR->XR atk ${xr.atk / urStats.atk}`);
 });
 
-test('XR: transcends exactly 1.35x its UR form without inventing a catalog band', () => {
+test('XR: transcends exactly 1.45x its UR form without inventing a catalog band', () => {
   // XR has no catalog mean: it shares the UR normalization scale, because effectiveCard already
   // scales the promoted row's raw stats by the power-curve ratio. Scaling here again would square
-  // it and hand a transcended card 1.82x instead of 1.35x.
+  // it and hand a transcended card ~2.1x instead of 1.45x.
   assert.equal(rarityScale('XR'), rarityScale('UR'));
   assert.equal(RARITY_COST.XR, RARITY_COST.UR + 1);
 
@@ -426,13 +426,13 @@ test('XR: transcends exactly 1.35x its UR form without inventing a catalog band'
   const xr = effectiveCard(ur, 'owned-xr-1', 'XR');
   assert.equal(xr.rarity, 'XR');
   assert.equal(xr.id, 'owned-xr-1');
-  assert.equal(xr.attack, Math.max(1, Math.round(ur.attack * 1.35)));
-  assert.equal(xr.defense, Math.max(1, Math.round(ur.defense * 1.35)));
+  assert.equal(xr.attack, Math.max(1, Math.round(ur.attack * 1.45)));
+  assert.equal(xr.defense, Math.max(1, Math.round(ur.defense * 1.45)));
   const urStats = battleStats(ur);
   const xrStats = battleStats(xr);
   assert.ok(power(xrStats) > power(urStats), `${power(xrStats)} vs ${power(urStats)}`);
-  // Slightly under 1.35 because the flat HP base in the stat derivation does not scale.
-  assert.ok(Math.abs(power(xrStats) / power(urStats) - 1.35) < 0.08, `${power(xrStats)} vs ${power(urStats)}`);
+  // Slightly under 1.45 because the flat HP base in the stat derivation does not scale.
+  assert.ok(Math.abs(power(xrStats) / power(urStats) - 1.45) < 0.08, `${power(xrStats)} vs ${power(urStats)}`);
   const xrAbility = abilityFor(xr);
   assert.equal(validateAbility(xrAbility).ok, true);
   assert.equal(xrAbility.cost, RARITY_COST.XR);
@@ -474,7 +474,7 @@ test('XR: owned progress drives the seed and keeps enhancement and traits', () =
   assert.equal(xrHit.op, 'damage');
   assert.equal(urHit.op, 'damage');
   if (xrHit.op === 'damage' && urHit.op === 'damage') {
-    assert.ok(Math.abs(xrHit.power / urHit.power - 1.35) < 0.03, 'signature grows once with XR power');
+    assert.ok(Math.abs(xrHit.power / urHit.power - 1.45) < 0.03, 'signature grows once with XR power');
   }
 });
 
@@ -482,21 +482,22 @@ test('XR: owned progress drives the seed and keeps enhancement and traits', () =
 // Difficulty tuning
 // ---------------------------------------------------------------------------
 
-test('opponents: ace and boss scale up, hard boss is pulled back, chaos is untouched', () => {
+test('opponents: ace and boss scale up, hard boss is pulled back, chaos general stages rise more', () => {
   assert.ok(Math.abs(opponentById('veteran', 'normal')!.statScale! - 1.06) < 1e-9);
   assert.ok(Math.abs(opponentById('ace', 'normal')!.statScale! - 1.06 * 1.18) < 1e-9);
   assert.ok(Math.abs(opponentById('boss', 'normal')!.statScale! - 1.06 * 1.2) < 1e-9);
   assert.ok(Math.abs(opponentById('ace', 'normal')!.hpScale - 1.15 * 1.18) < 1e-9);
   for (const id of ['rookie', 'regular', 'veteran', 'ace']) {
-    assert.ok(Math.abs(opponentById(id, 'hard')!.statScale! - 1.5 * 1.15) < 1e-9, id);
+    assert.ok(Math.abs(opponentById(id, 'hard')!.statScale! - 1.62 * 1.15) < 1e-9, id);
   }
-  assert.ok(Math.abs(opponentById('boss', 'hard')!.statScale! - 1.5 * 0.92) < 1e-9);
+  assert.ok(Math.abs(opponentById('boss', 'hard')!.statScale! - 1.62 * 0.92) < 1e-9);
   // Hard is still harder than normal overall, but the boss is pulled back relative to hard's ace.
   assert.ok(opponentById('boss', 'hard')!.statScale! < opponentById('ace', 'hard')!.statScale!);
   assert.ok(opponentById('boss', 'hard')!.statScale! > opponentById('boss', 'normal')!.statScale!);
-  assert.ok(Math.abs(opponentById('boss', 'hard')!.hpScale - 1.25 * 1.5 * 0.92) < 1e-9);
-  assert.equal(opponentById('boss', 'chaos')!.statScale, 2.1);
-  assert.equal(opponentById('rookie', 'chaos')!.statScale, 2.1);
+  assert.ok(Math.abs(opponentById('boss', 'hard')!.hpScale - 1.25 * 1.62 * 0.92) < 1e-9);
+  assert.ok(Math.abs(opponentById('rookie', 'chaos')!.statScale! - 2.18 * 1.1) < 1e-9);
+  assert.ok(Math.abs(opponentById('boss', 'chaos')!.statScale! - 2.18 * 1.04) < 1e-9);
+  assert.ok(opponentById('rookie', 'chaos')!.statScale! > opponentById('boss', 'chaos')!.statScale!);
 });
 
 test('opponents: the scaled team is derived from the same cards the ladder names', () => {
@@ -547,7 +548,7 @@ test('replay: the same setup and decisions reproduce a battle byte for byte', ()
   assert.equal(project(replayed.state), project(first.state));
   assert.deepEqual(replayed.events, first.events);
   assert.equal(replayed.state.ruleset, BATTLE_RULESET_VERSION);
-  assert.equal(BATTLE_RULESET_VERSION, 5);
+  assert.equal(BATTLE_RULESET_VERSION, 6);
 });
 
 // ---------------------------------------------------------------------------

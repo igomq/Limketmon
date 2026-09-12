@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     if (!body || typeof body !== 'object' || Array.isArray(body) || !('action' in body)) {
       return NextResponse.json({ error: '요청을 확인해주세요.' }, { status: 400 });
     }
-    const payload = body as { action?: unknown; deckId?: unknown; opponentId?: unknown; kind?: unknown; mode?: unknown; battleId?: unknown; decisions?: unknown };
+    const payload = body as { action?: unknown; deckId?: unknown; opponentId?: unknown; kind?: unknown; mode?: unknown; battleId?: unknown; decisions?: unknown; rewardTicketType?: unknown };
     await ensureUser(user.userId, user.email);
     switch (payload.action) {
       case 'start': {
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
         if (typeof payload.battleId !== 'string') {
           return NextResponse.json({ error: '전투를 찾을 수 없습니다.' }, { status: 400 });
         }
-        return NextResponse.json({ summary: await finishBattle(user.userId, payload.battleId, payload.decisions) });
+        return NextResponse.json({ summary: await finishBattle(user.userId, payload.battleId, payload.decisions, new Date(), payload.rewardTicketType) });
       }
       case 'replay': {
         if (typeof payload.battleId !== 'string') {

@@ -10,22 +10,32 @@ export const MAX_ENHANCE = 15;
  * battleStats anchors each rarity to its level-0 band and applyEnhance scales by the ratio.
  *
  * The level-0 bands carry the card self-buff of the high rarities (SR +3%, SSR +6%, UR +10%), so a
- * native high-rarity card sits just above its landmark. XR is transcend-only and has no catalog
- * band of its own: it is exactly UR * 1.35. Nothing downstream re-applies these percentages, they
- * are read back through enhancePower().
+* native high-rarity card sits just above its landmark. XR is transcend-only and has no catalog
+ * band of its own: it is UR * XR_MULT. Levels 1-4 keep 55% of the raw gain; from +5 the original
+ * per-level deltas resume, so +15 ends lower than the old cap.
  */
-const POWER_CURVE: Record<Rarity, (level: number) => number> = {
+const XR_MULT = 1.45;
+const EARLY_ENHANCE = 4;
+const EARLY_SCALE = 0.55;
+
+const RAW_POWER_CURVE: Record<Rarity, (level: number) => number> = {
   N: (level) => 1 + 0.08 * level + 0.006 * level * level,
   R: (level) => 1.25 + 0.1 * level + 0.013 * level * level,
   SR: (level) => 1.55 * 1.03 + 0.3 * level + 0.006 * level * level,
   SSR: (level) => 2.4 * 1.06 + 0.32 * level + 0.022 * level * level,
   UR: (level) => 3.55 * 1.1 + 0.4 * level + 0.025 * level * level,
-  XR: (level) => 1.35 * (3.55 * 1.1 + 0.4 * level + 0.025 * level * level)
+  XR: (level) => XR_MULT * (3.55 * 1.1 + 0.4 * level + 0.025 * level * level)
 };
 
 /** Normalized power of a rarity at an enhancement level. Strictly increasing in `level`. */
 export function enhancePower(rarity: Rarity, level: number): number {
-  return POWER_CURVE[rarity](clampEnhance(level));
+  const lv = clampEnhance(level);
+  const raw = RAW_POWER_CURVE[rarity];
+  const base = raw(0);
+  const current = raw(lv);
+  if (lv <= EARLY_ENHANCE) return base + (current - base) * EARLY_SCALE;
+  const atEarly = raw(EARLY_ENHANCE);
+  return base + (atEarly - base) * EARLY_SCALE + (current - atEarly);
 }
 
 export function clampEnhance(level: number): number {
@@ -58,7 +68,7 @@ export function applyEnhance<T extends { maxHp: number; atk: number; def: number
   const current = clampEnhance(level);
   if (current === 0) return stats;
   // Ratio to the rarity's level-0 band, so an enhanced card keeps its own stat shape.
-  const mul = POWER_CURVE[rarity](current) / POWER_CURVE[rarity](0);
+  const mul = enhancePower(rarity, current) / enhancePower(rarity, 0);
   return {
     ...stats,
     maxHp: Math.max(1, Math.round(stats.maxHp * mul)),

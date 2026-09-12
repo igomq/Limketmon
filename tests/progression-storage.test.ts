@@ -166,7 +166,7 @@ test('transcend moves one body and its budget and deck reference, leaving untrai
     db.prepare('INSERT INTO deck_cards VALUES (?,0,?)').bind(u,id).run();
     const result=await trans(u,id); assert.ok(result.cardId);
     const output=row(u,result.cardId); assert.equal(output.rarity_override,'UR'); assert.equal(output.enhance_level,5); assert.equal(output.quantity,1);
-    assert.deepEqual(JSON.parse(output.traits),[{...trait(),transcended:true,spentProof:400},{...traits[1],spentProof:190}]); assert.equal(state(u).twin_proof,4);
+    assert.deepEqual(JSON.parse(output.traits),[{...trait(),transcended:true,spentProof:400},{...traits[1],spentProof:190}]); assert.equal(state(u).twin_proof,1);
     assert.equal(row(u,id)?.quantity ?? 0,quantity-1);
     assert.equal(db.prepare('SELECT card_id FROM deck_cards WHERE deck_id=?').bind(u).first().card_id,result.cardId);
     if(quantity>1) { assert.equal(row(u,id).enhance_level,0); assert.equal(row(u,id).traits,'[]'); await assert.rejects(()=>trans(u,id)); }
@@ -178,7 +178,7 @@ test('transcend thresholds, XR cap, repeated trait and missing currency refuse a
     const u=await user(), id=own(u,rarity,2,level,[trait(tl,done)],crypto.randomUUID(),card('UR').id);balances(u,0,0,twin);
     const before=dump(u);await assert.rejects(()=>trans(u,id));assert.equal(dump(u),before);
   }
-  const u=await user(),id=own(u,'UR',2,5,[trait()]);balances(u,0,0,1);
+  const u=await user(),id=own(u,'UR',2,5,[trait()]);balances(u,0,0,5);
   const results=await Promise.allSettled([trans(u,id),trans(u,id)]);
   assert.equal(results.filter((r)=>r.status==='fulfilled').length,1);assert.equal(state(u).twin_proof,0);
   assert.equal((await game.ownedRows(u)).filter((r)=>r.rarity_override==='XR').length,1);
@@ -273,12 +273,14 @@ test('battle slot parser preserves full progress and rejects corrupt traits',()=
 // changes neither their storage contract nor their player-decision generation.
 async function battle(u:string,mode:BattleMode='normal',opponentId='rookie',kind:'pve'|'daily'='pve') {
   const ids=game.cards.filter((c)=>['UR','SSR'].includes(c.rarity)).sort((a,b)=>Number(b.rarity==='UR')-Number(a.rarity==='UR')).slice(0,3).map((c)=>c.id);
-  const slots=ids.map((id)=>({id,lv:15,progress:{baseCardId:id,rarity:game.cards.find((c)=>c.id===id)!.rarity,enhanceLevel:15,traits:[]}}));
+  const slots=ids.map((id)=>({id,lv:15,progress:{baseCardId:id,rarity:'XR' as const,enhanceLevel:15,traits:[{id:'damage' as const,level:20,transcended:true},{id:'synergy' as const,level:20,transcended:true}]}}));
   const id=crypto.randomUUID();
   const options={kind,mode,opponentId,modifier:{kind:'none' as const},seed:12345,playerCardIds:ids,playerEnhance:slots.map((s)=>s.lv),playerProgress:slots.map((s)=>s.progress),battleId:id};
   const setup=buildSetup(options);let state=createBattle(setup);const decisions:Decision[]=[];
   for(let i=0;i<1000 && state.status==='active';i++){
-    const decision=aiDecision(state,opponentById(opponentId,mode)!.profile);
+    const decision=aiDecision(state, state.activeUid?.startsWith('a')
+      ? { healBelow: 0.3, lethalFirst: true, skillMinTargets: 0, skillAppetite: 1 }
+      : opponentById(opponentId,mode)!.profile);
     const result=advance(state,decision);assert.equal(result.error,undefined);if(decision.uid.startsWith('a'))decisions.push(decision);state=result.state;
   }
   assert.equal(state.status,'won','fixture must actually win');
@@ -296,7 +298,7 @@ test('daily object claims pay once with exact receipts across concurrent battles
 });
 
 test('all 15 victory tiers pay first/repeat exact receipts; concurrent finish is idempotent',async()=>{
-  const tiers=[['normal','rookie','low',2],['normal','regular','low',3],['normal','veteran','low',4],['normal','ace','normal',2],['normal','boss','normal',3],['hard','rookie','normal',3],['hard','regular','normal',4],['hard','veteran','normal',5],['hard','ace','normal',6],['hard','boss','sr',2],['chaos','rookie','sr',2],['chaos','regular','sr',3],['chaos','veteran','sr',4],['chaos','ace','ssr',2],['chaos','boss','ssr',3]] as const;
+  const tiers=[['normal','rookie','low',1],['normal','regular','low',2],['normal','veteran','low',3],['normal','ace','normal',2],['normal','boss','normal',3],['hard','rookie','normal',3],['hard','regular','normal',4],['hard','veteran','normal',5],['hard','ace','normal',6],['hard','boss','sr',2],['chaos','rookie','sr',2],['chaos','regular','sr',3],['chaos','veteran','sr',4],['chaos','ace','ssr',1],['chaos','boss','ssr',2]] as const;
   for(const [mode,opponent,type,quantity] of tiers){
     const u=await user(),a=await battle(u,mode,opponent);
     const [first,retry]=await Promise.all([game.finishBattle(u,a.id,a.decisions),game.finishBattle(u,a.id,a.decisions)]);assert.deepEqual(retry,first);
@@ -356,8 +358,8 @@ test('each effective rarity dismantles at its specified proof rate',async()=>{
 test('distinct concurrent first victories pay two win rewards and only one first-clear extra',async()=>{
   const u=await user(),a=await battle(u),b=await battle(u);
   const receipts=await Promise.all([game.finishBattle(u,a.id,a.decisions),game.finishBattle(u,b.id,b.decisions)]);
-  assert.equal(receipts.flatMap((r)=>r.rewards).filter((r)=>r.ticketType==='low').reduce((sum,r)=>sum+r.quantity!,0),6);
-  assert.equal(state(u).low_tickets,6);
+  assert.equal(receipts.flatMap((r)=>r.rewards).filter((r)=>r.ticketType==='low').reduce((sum,r)=>sum+r.quantity!,0),3);
+  assert.equal(state(u).low_tickets,3);
   assert.equal(db.prepare("SELECT COUNT(*) AS c FROM reward_claims WHERE user_id=? AND claim_key='pve_first:rookie'").bind(u).first().c,1);
 });
 

@@ -55,9 +55,9 @@ export function ticketDropClaimKey(battleId: string): string {
  */
 const VICTORY_TICKETS: Record<BattleMode, Record<string, { ticketType: TicketType; quantity: number }>> = {
   normal: {
-    rookie: { ticketType: 'low', quantity: 2 },
-    regular: { ticketType: 'low', quantity: 3 },
-    veteran: { ticketType: 'low', quantity: 4 },
+    rookie: { ticketType: 'low', quantity: 1 },
+    regular: { ticketType: 'low', quantity: 2 },
+    veteran: { ticketType: 'low', quantity: 3 },
     ace: { ticketType: 'normal', quantity: 2 },
     boss: { ticketType: 'normal', quantity: 3 }
   },
@@ -72,13 +72,38 @@ const VICTORY_TICKETS: Record<BattleMode, Record<string, { ticketType: TicketTyp
     rookie: { ticketType: 'sr', quantity: 2 },
     regular: { ticketType: 'sr', quantity: 3 },
     veteran: { ticketType: 'sr', quantity: 4 },
+    ace: { ticketType: 'ssr', quantity: 1 },
+    boss: { ticketType: 'ssr', quantity: 2 }
+  },
+  extreme: {
+    rookie: { ticketType: 'sr', quantity: 3 },
+    regular: { ticketType: 'sr', quantity: 4 },
+    veteran: { ticketType: 'sr', quantity: 5 },
     ace: { ticketType: 'ssr', quantity: 2 },
-    boss: { ticketType: 'ssr', quantity: 3 }
+    boss: { ticketType: 'ssr', quantity: 2 }
   }
 };
 
+/** Extreme wins let the player pick one of these four ticket bundles. */
+const EXTREME_CHOICE: Record<string, Record<TicketType, number>> = {
+  rookie: { low: 12, normal: 6, sr: 3, ssr: 1 },
+  regular: { low: 16, normal: 8, sr: 4, ssr: 1 },
+  veteran: { low: 20, normal: 10, sr: 5, ssr: 2 },
+  ace: { low: 24, normal: 12, sr: 6, ssr: 2 },
+  boss: { low: 32, normal: 16, sr: 8, ssr: 2 }
+};
+
+export function extremeRewardOptions(opponentId: string): Record<TicketType, number> | undefined {
+  return EXTREME_CHOICE[opponentId];
+}
+
 /** The ticket a single win pays, before the first-clear extra. */
-export function victoryTicketReward(mode: BattleMode, opponentId: string): { ticketType: TicketType; quantity: number } {
+export function victoryTicketReward(mode: BattleMode, opponentId: string, choice?: TicketType): { ticketType: TicketType; quantity: number } {
+  if (mode === 'extreme') {
+    const options = EXTREME_CHOICE[opponentId];
+    if (!options || !choice || !options[choice]) return { ticketType: 'low', quantity: 0 };
+    return { ticketType: choice, quantity: options[choice] };
+  }
   const table = VICTORY_TICKETS[mode] ?? VICTORY_TICKETS.normal;
   return table[opponentId] ?? { ticketType: 'low', quantity: 0 };
 }
@@ -121,4 +146,3 @@ export function planBattleRewards(input: BattleRewardInput, firstClearCredits: n
   }
   return { credits: claims.reduce((sum, claim) => sum + claim.credits, 0), claims, lines };
 }
-

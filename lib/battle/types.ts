@@ -12,10 +12,11 @@ import { traitValue, type Trait, type TraitId } from '../progression.ts';
  * 5: earth/water/fire/grass/dark elements, member positions, owned-card traits and the
  *    2-round element link. A row stored under 4 or earlier is refused (see lib/game.ts)
  *    instead of re-simulated with rules it was never played under.
+ * 6: extreme mode, grown opponent loadouts, retuned hard/chaos scale.
  */
-export const BATTLE_RULESET_VERSION = 5;
+export const BATTLE_RULESET_VERSION = 6;
 
-export const BATTLE_MODES = ['normal', 'hard', 'chaos'] as const;
+export const BATTLE_MODES = ['normal', 'hard', 'chaos', 'extreme'] as const;
 export type BattleMode = (typeof BATTLE_MODES)[number];
 
 export const ELEMENTS = ['earth', 'water', 'fire', 'grass', 'dark'] as const;
@@ -359,6 +360,14 @@ export interface AiProfile {
   skillAppetite: number;
 }
 
+/** Optional grown copy of a catalog card used by higher-difficulty modes. */
+export interface OpponentLoadout {
+  cardId: string;
+  enhance: number;
+  rarity?: Rarity;
+  traits?: Trait[];
+}
+
 export interface Opponent {
   id: string;
   name: string;
@@ -371,6 +380,8 @@ export interface Opponent {
   hpScale: number;
   /** Multiplier for ATK and DEF. Scales with difficulty mode to keep fights threatening. */
   statScale?: number;
+  /** When set, opponentTeam builds these grown rows instead of bare catalog cards. */
+  loadout?: OpponentLoadout[];
   profile: AiProfile;
   reward: { credits: number; label: string };
 }

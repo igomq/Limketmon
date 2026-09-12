@@ -5,7 +5,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import type { Card, CouponGrant, PullResult, Snapshot } from '../lib/game';
 import type { BattleSummaryRow, DeckSummary } from '../lib/battle/api';
 import type { BattleMode } from '../lib/battle/types';
-import { RARITY_ORDER, RARITY_WEIGHTS, type Rarity } from '../lib/rules';
+import { RARITY_ORDER, RARITY_WEIGHTS, SR_TICKET_WEIGHTS, type Rarity } from '../lib/rules';
 import { STATUS_LABEL, type BattleEvent } from '../lib/battle/types';
 import { MODE_LABELS } from '../lib/battle/opponents';
 import { cardTitle, projectedPosition, selectCards, type CollectionFilter } from '../lib/collection';
@@ -48,7 +48,7 @@ const LOW_TICKET_WEIGHTS: Array<[Rarity, number]> = [['N', 0.78], ['R', 0.2], ['
 
 /** 등급별 등장 확률: 기본 가중치에서 그 지갑의 풀만 남기고 정규화한다. 천장은 쓰지 않는다. */
 function ticketOdds(type: TicketType): Array<[Rarity, number]> {
-  const pool = type === 'low' ? LOW_TICKET_WEIGHTS : RARITY_WEIGHTS;
+  const pool = type === 'low' ? LOW_TICKET_WEIGHTS : type === 'sr' ? SR_TICKET_WEIGHTS : RARITY_WEIGHTS;
   const minimum: Rarity[] | null = type === 'sr' ? ['SR', 'SSR', 'UR'] : type === 'ssr' ? ['SSR', 'UR'] : null;
   const allowed = pool.filter(([rarity]) => !minimum || minimum.includes(rarity));
   const total = allowed.reduce((sum, [, weight]) => sum + weight, 0) || 1;

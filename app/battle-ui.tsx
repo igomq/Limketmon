@@ -1,12 +1,14 @@
 'use client';
 
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Card } from '../lib/cards';
 import type { Ability, AiProfile, BattleEvent, BattleKind, BattleMode, BattleModifier, BattleSetup, BattleState, Combatant, Decision } from '../lib/battle/types';
 import { ELEMENT_LABEL, STATUS_LABEL } from '../lib/battle/types';
 import type { BattleResultSummary, BattleSetupResponse, DailyChallengeSummary, DeckSummary } from '../lib/battle/api';
 import { BATTLE_MODES, MODE_CREDITS_MULTIPLIER, MODE_LABELS, OPPONENTS, opponentById } from '../lib/battle/opponents';
+import { extremeRewardOptions } from '../lib/rewards';
+import type { TicketType } from '../lib/pull';
 import { runBattle, stepBattle } from '../lib/battle/simulate';
 import { aiDecision, deciderFor } from '../lib/battle/ai';
 import { CardArtwork, CardBadges, Icon, cardIdentity, describeOps, isTranscended, spring } from './card-ui';
@@ -42,7 +44,8 @@ const DECK_SIZE = 3;
 const DIFFICULTY_LABEL: Record<string, string> = { beginner: '입문', normal: '보통', hard: '하드', boss: '보스' };
 const RESULT_LABEL: Record<BattleState['status'], string> = { active: '진행 중', won: '승리', lost: '패배', draw: '무승부' };
 /** Shown on a locked mode chip; the requirement mirrors the server unlock rule. */
-const MODE_UNLOCK_HINT: Record<BattleMode, string> = { normal: '기본 해제', hard: '일반 5명 격파 시', chaos: '하드 5명 격파 시' };
+const MODE_UNLOCK_HINT: Record<BattleMode, string> = { normal: '기본 해제', hard: '일반 5명 격파 시', chaos: '하드 5명 격파 시', extreme: '카오스 5명 격파 시' };
+const TICKET_LABEL: Record<TicketType, string> = { low: '하급 뽑기권', normal: '보통 뽑기권', sr: 'SR 이상 뽑기권', ssr: 'SSR 이상 뽑기권' };
 /** Mirrors lib/achievements.ts ids; the summary only carries ids. */
 const ACHIEVEMENT_LABEL: Record<string, string> = {
   first_win: '첫 승리',
@@ -231,8 +234,15 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
   }, [phase]);
   const [deckId, setDeckId] = useState('');
   const [mode, setMode] = useState<BattleMode>('normal');
+  const [rewardChoice, setRewardChoice] = useState<TicketType | null>(null);
   const [starting, setStarting] = useState(false);
   const [setup, setSetup] = useState<BattleSetupResponse | null>(null);
+  const extremeOn = mode === 'extreme' || setup?.mode === 'extreme';
+  useEffect(() => {
+    if (extremeOn) document.documentElement.dataset.extreme = 'true';
+    else delete document.documentElement.dataset.extreme;
+    return () => { delete document.documentElement.dataset.extreme; };
+  }, [extremeOn]);
   const [battleId, setBattleId] = useState<string | null>(null);
   const [state, setState] = useState<BattleState | null>(null);
   const [queue, setQueue] = useState<BattleEvent[]>([]);
@@ -307,7 +317,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
       const response = await fetch('/api/battle', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'finish', battleId, decisions: decisions.current })
+        body: JSON.stringify({ action: 'finish', battleId, decisions: decisions.current, ...(rewardChoice ? { rewardTicketType: rewardChoice } : {}) })
       });
       const payload = await response.json().catch(() => null) as { summary?: unknown; error?: string } | null;
       const result = readSummary(payload);
@@ -328,14 +338,18 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
     } finally {
       if (run === settleRun.current) setSettling(false);
     }
-  }, [battleId, onError, onStateChange]);
+  }, [battleId, onError, onStateChange, rewardChoice]);
 
   useEffect(() => {
     if (phase !== 'battle' || !state || state.status === 'active' || settled.current) return;
+    if (state.status === 'won' && setup?.mode === 'extreme' && !rewardChoice) {
+      setResultOpen(true);
+      return;
+    }
     settled.current = true;
     setResultOpen(true);
     void settle();
-  }, [phase, state, settle]);
+  }, [phase, state, settle, setup?.mode, rewardChoice]);
 
   const chosen = decks.find((deck) => deck.id === deckId) ?? null;
   const chosenLegal = !!chosen && chosen.cards.length === DECK_SIZE;
@@ -377,6 +391,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
       setSummary(null);
       setSettleFailed(false);
       setResultOpen(false);
+      setRewardChoice(null);
       setPhase('battle');
     } catch (error) {
       if (run !== startRun.current) return;
@@ -470,10 +485,10 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
             <p className="deck-hint" role="status"><Icon name={(clearedByMode[mode]?.length ?? 0) >= OPPONENTS.length ? 'check' : 'sparkle'} />{MODE_LABELS[mode]} 모드 · {clearedByMode[mode]?.length ?? 0} / {OPPONENTS.length} 격파</p>
           </div>
           <div className="mode-selector" role="group" aria-label="난이도 모드 선택">
-            {BATTLE_MODES.map((item) => {
+            {BATTLE_MODES.filter((item) => item === 'normal' || item === 'hard' || unlockedModes.includes(item)).map((item) => {
               const unlocked = unlockedModes.includes(item);
               const cleared = clearedByMode[item]?.length ?? 0;
-              return <button key={item} className="mode-chip" aria-pressed={mode === item} disabled={!unlocked || starting} onClick={() => setMode(item)}>
+              return <button key={item} className="mode-chip" data-mode={item} aria-pressed={mode === item} disabled={!unlocked || starting} onClick={() => setMode(item)}>
                 <strong>{MODE_LABELS[item]}</strong>
                 <small>{unlocked ? `격파 ${cleared} / ${OPPONENTS.length}` : MODE_UNLOCK_HINT[item]}</small>
                 {unlocked && cleared >= OPPONENTS.length && <Icon name="check" />}
@@ -482,7 +497,9 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
           </div>
           <p className="mode-note">{mode === 'normal'
             ? '기본 난이도입니다. 여기서 상대를 모두 격파하면 상위 모드가 열려요.'
-            : `${MODE_LABELS[mode]} 모드는 상대가 더 강하고 첫 격파 보상이 ${MODE_CREDITS_MULTIPLIER[mode]}배이며, 확정권 드롭 확률도 올라갑니다.`}</p>
+            : mode === 'extreme'
+              ? '익스트림은 상대가 성장한 카드로 나오고, 승리 보상 뽑기권 종류를 고를 수 있습니다.'
+              : `${MODE_LABELS[mode]} 모드는 상대가 더 강하고 첫 격파 보상이 ${MODE_CREDITS_MULTIPLIER[mode]}배입니다.`}</p>
         </section>
 
         {chosenLegal ? (
@@ -562,7 +579,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
                       <span className="difficulty">{DIFFICULTY_LABEL[opponent.difficulty] ?? opponent.difficulty}</span>
                     </header>
                     <p className="opponent-blurb">{opponent.blurb}</p>
-                    <p className="opponent-reward"><Icon name="ticket" />{cleared ? '첫 보상 수령 완료 · 승리 시 확정 지급' : `${opponent.reward.label} ${opponent.reward.credits}장 · 승리 시 확정 지급`}</p>
+                    <p className="opponent-reward"><Icon name="ticket" />{mode === 'extreme' ? (cleared ? '첫 보상 수령 완료 · 승리 시 뽑기권 종류 선택' : '승리 시 하급·일반·SR+·SSR+ 중 하나 선택') : cleared ? '첫 보상 수령 완료 · 승리 시 확정 지급' : `${opponent.reward.label} ${opponent.reward.credits}장 · 승리 시 확정 지급`}</p>
                     <button className="btn btn-dark" disabled={!chosenLegal || starting} onClick={() => void start(opponent.id, 'pve', mode)}>
                       이 덱으로 전투<Icon name="arrow" />
                     </button>
@@ -733,6 +750,9 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
                 <SummaryBody summary={summary} byId={byId} />
               </div>
             )}
+            {state.status === 'won' && setup?.mode === 'extreme' && !summary && (
+              <ExtremeRewardPicker opponentId={setup.opponentId} value={rewardChoice} disabled={settling} onPick={setRewardChoice} />
+            )}
             <div className="result-actions">
               <button className="btn btn-primary" onClick={() => setResultOpen(true)}>정산 결과 열기<Icon name="arrow" /></button>
               <button className="text-button" onClick={() => onNavigate('deck')}>덱 정리</button>
@@ -756,12 +776,36 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
               onRematch={() => { setResultOpen(false); if (setup) void start(setup.opponentId, state.kind, setup.mode ?? 'normal'); }}
               onNavigate={onNavigate}
               onClose={() => setResultOpen(false)}
+              rewardPicker={state.status === 'won' && setup?.mode === 'extreme' && !summary ? (
+                <ExtremeRewardPicker opponentId={setup.opponentId} value={rewardChoice} disabled={settling} onPick={setRewardChoice} />
+              ) : null}
             />
           )}
         </AnimatePresence>
       </div>
     </section>
   );
+}
+
+function ExtremeRewardPicker({ opponentId, value, disabled, onPick }: {
+  opponentId: string;
+  value: TicketType | null;
+  disabled: boolean;
+  onPick: (type: TicketType) => void;
+}) {
+  const options = extremeRewardOptions(opponentId);
+  if (!options) return null;
+  return <div className="extreme-rewards" role="group" aria-label="승리 보상 선택">
+    <p>받을 뽑기권 종류를 고르세요. 한 가지만 지급됩니다.</p>
+    <div className="mode-selector">
+      {(['low', 'normal', 'sr', 'ssr'] as const).map((type) => (
+        <button key={type} type="button" className="mode-chip" data-mode="extreme" aria-pressed={value === type} disabled={disabled} onClick={() => onPick(type)}>
+          <strong>{TICKET_LABEL[type]}</strong>
+          <small>{options[type]}장</small>
+        </button>
+      ))}
+    </div>
+  </div>;
 }
 
 /** Reward receipt, achievements and battle numbers: one body for the arena panel and the result sheet. */
@@ -794,7 +838,7 @@ function SummaryBody({ summary, byId }: { summary: BattleResultSummary; byId: Ma
  * Settlement result sheet. Native dialog: Escape and the backdrop dismiss it without leaving the
  * battle, and the arena keeps a re-open handle. A failed settle keeps its retry in here.
  */
-function ResultDialog({ outcome, round, endReason, summary, settling, settleFailed, byId, onRetry, onExit, onRematch, onNavigate, onClose }: {
+function ResultDialog({ outcome, round, endReason, summary, settling, settleFailed, byId, onRetry, onExit, onRematch, onNavigate, onClose, rewardPicker }: {
   outcome: string;
   round: number;
   endReason?: 'hp' | 'turn_limit' | 'timeout';
@@ -807,6 +851,7 @@ function ResultDialog({ outcome, round, endReason, summary, settling, settleFail
   onRematch: () => void;
   onNavigate: (tab: string) => void;
   onClose: () => void;
+  rewardPicker?: ReactNode;
 }) {
   const reduced = useReducedMotion();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -859,6 +904,7 @@ function ResultDialog({ outcome, round, endReason, summary, settling, settleFail
               <button className="btn btn-dark" onClick={onRetry}>다시 확인하기</button>
             </div>
           )}
+          {rewardPicker}
           {summary && (
             <div className="result-summary">
               <h3 className="result-receipt"><Icon name="ticket" />지급 내역</h3>

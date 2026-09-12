@@ -66,11 +66,19 @@ export function rarityRank(rarity: Rarity): number {
 
 /**
  * Rarity for a guaranteed-pull ticket: never weaker than `min`, otherwise the base weight ratios
- * among the allowed rarities, renormalised to sum to one. Uses the normal table's weights.
+ * among the allowed rarities, renormalised to sum to one.
+ * SR+ uses a dedicated table so SSR is rarer than a raw-weight split of the normal odds.
  */
+export const SR_TICKET_WEIGHTS: OddsTable = [
+  ['SR', 0.94],
+  ['SSR', 0.055],
+  ['UR', 0.005]
+];
+
 export function rollGuaranteedRarity(roll: number, min: 'SR' | 'SSR'): Rarity {
   const allowed: Rarity[] = min === 'SSR' ? ['SSR', 'UR'] : ['SR', 'SSR', 'UR'];
-  const pool = RARITY_WEIGHTS.filter(([rarity]) => allowed.includes(rarity));
+  const source = min === 'SR' ? SR_TICKET_WEIGHTS : RARITY_WEIGHTS;
+  const pool = source.filter(([rarity]) => allowed.includes(rarity));
   const total = pool.reduce((sum, [, weight]) => sum + weight, 0);
   let cumulative = 0;
   for (const [rarity, weight] of pool) {
@@ -79,4 +87,3 @@ export function rollGuaranteedRarity(roll: number, min: 'SR' | 'SSR'): Rarity {
   }
   return allowed[allowed.length - 1]!;
 }
-

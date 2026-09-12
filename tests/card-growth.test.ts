@@ -25,7 +25,7 @@ import {
   TRAIT_IDS,
   TRAIT_LABEL,
   RARITY_STEPS,
-  TWIN_PROOF_COST,
+  twinProofCost,
   type CardProgress,
   type Trait
 } from '../lib/progression.ts';
@@ -52,10 +52,12 @@ test('the trait catalogue is exactly the seven ids with Korean labels', () => {
   assert.equal(FRAGMENTS_PER_TWIN_PROOF, 5);
   assert.equal(MIN_TRANSCEND_ENHANCE, 5);
   assert.equal(MIN_TRANSCEND_TRAIT_LEVEL, 10);
-  assert.equal(TWIN_PROOF_COST, 1);
+  assert.equal(twinProofCost('N'), 1);
+  assert.equal(twinProofCost('R'), 2);
+  assert.equal(twinProofCost('UR'), 5);
 });
 
-test('traitValue is 1% per level plus a 5% step every five, x1.75 transcended', () => {
+test('traitValue is 1% per level plus a 5% step every five, x2 transcended', () => {
   const expected: Array<[number, number]> = [
     [0, 0],
     [1, 0.01],
@@ -68,8 +70,8 @@ test('traitValue is 1% per level plus a 5% step every five, x1.75 transcended', 
   ];
   for (const [level, value] of expected) near(traitValue(trait({ level })), value);
   // The transcend bonus doubles down on the 5-level steps.
-  near(traitValue(trait({ level: 10, transcended: true })), 0.35);
-  near(traitValue(trait({ level: 20, transcended: true })), MAX_RESIST);
+  near(traitValue(trait({ level: 10, transcended: true })), 0.4);
+  near(traitValue(trait({ level: 20, transcended: true })), 0.8);
   // Out-of-range and broken input never escapes 0..20.
   near(traitValue(trait({ level: 99 })), 0.4);
   near(traitValue(trait({ level: -3 })), 0);
@@ -234,10 +236,10 @@ test('effectiveCard re-labels the owned row and keeps the same-rarity stats', ()
   assert.equal(effectiveCard(promoted, 'owned-n-xr', 'XR').baseCardId, n.id);
 });
 
-test('effectiveCard lands XR exactly at UR * 1.35 and climbs every step', () => {
+test('effectiveCard lands XR exactly at UR * 1.45 and climbs every step', () => {
   const n = cardOf('N');
   const ratio = (rarity: Card['rarity']) => enhancePower(rarity, 0) / enhancePower('N', 0);
-  near(ratio('XR'), ratio('UR') * 1.35);
+  near(ratio('XR'), ratio('UR') * 1.45);
   near(effectiveCard(n, 'owned-xr', 'XR').attack, Math.round(n.attack * ratio('XR')));
   let previous = 0;
   for (const rarity of RARITY_STEPS) {
@@ -256,7 +258,7 @@ test('the power curve carries the rarity self-buff and still grows with every en
   near(enhancePower('SR', 0), 1.55 * 1.03);
   near(enhancePower('SSR', 0), 2.4 * 1.06);
   near(enhancePower('UR', 0), 3.55 * 1.1);
-  near(enhancePower('XR', 0), enhancePower('UR', 0) * 1.35);
+  near(enhancePower('XR', 0), enhancePower('UR', 0) * 1.45);
   for (const rarity of RARITY_STEPS) {
     for (let level = 0; level < MAX_ENHANCE; level++) {
       assert.ok(enhancePower(rarity, level + 1) > enhancePower(rarity, level), `${rarity}@${level}`);

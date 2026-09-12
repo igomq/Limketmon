@@ -79,7 +79,7 @@ export function emptySnapshot(now = new Date()): Snapshot {
     tickets: { low: 0, sr: 0, ssr: 0 },
     materials: { proof: 0, fragments: 0, twinProof: 0 },
     unlockedModes: ['normal'],
-    clearedByMode: { normal: [], hard: [], chaos: [] },
+    clearedByMode: { normal: [], hard: [], chaos: [], extreme: [] },
     decks: [],
     daily: dailySummary(date, new Set()),
     recentBattles: [],
@@ -222,7 +222,7 @@ export async function getSnapshot(userId: string, now = new Date()): Promise<Sna
     ownedRarities: [...new Set(inventory.map((row) => rarityById[row.card_id]).filter(Boolean))]
   };
   const satisfied = new Set(evaluateAchievements(progress));
-  const clearedByMode: Record<BattleMode, string[]> = { normal: [], hard: [], chaos: [] };
+  const clearedByMode: Record<BattleMode, string[]> = { normal: [], hard: [], chaos: [], extreme: [] };
   for (const mode of BATTLE_MODES) {
     clearedByMode[mode] = OPPONENTS.filter((opponent) => claims.has(pveFirstClearClaimKey(opponent.id, mode))).map(
       (opponent) => opponent.id
@@ -923,7 +923,8 @@ export async function finishBattle(
   userId: string,
   battleId: string,
   decisions: unknown,
-  now = new Date()
+  now = new Date(),
+  rewardTicketType?: unknown
 ): Promise<BattleResultSummary> {
   const db = getDatabase();
   if (typeof battleId !== 'string' || battleId.length > 64) {
@@ -1008,7 +1009,18 @@ export async function finishBattle(
   // key for the battle's own KST date, and the achievement keys.
   const claims = await progressClaims(userId, kst);
   const plan = row.kind === 'daily' ? planBattleRewards({ kind: 'daily', opponentId: row.opponent_id, mode, result, kstDate: kst, firstClear: false, battleId }, 0) : { credits: 0, claims: [], lines: [] };
-  const victory = result === 'won' && row.kind !== 'daily' ? victoryTicketReward(mode, row.opponent_id) : null;
+  let victory: { ticketType: TicketType; quantity: number } | null = null;
+  if (result === 'won' && row.kind !== 'daily') {
+    if (mode === 'extreme') {
+      if (rewardTicketType !== 'low' && rewardTicketType !== 'normal' && rewardTicketType !== 'sr' && rewardTicketType !== 'ssr') {
+        throw new GameError('reward_choice', '보상을 선택해주세요.');
+      }
+      victory = victoryTicketReward(mode, row.opponent_id, rewardTicketType);
+      if (!victory.quantity) throw new GameError('reward_choice', '보상을 선택해주세요.');
+    } else {
+      victory = victoryTicketReward(mode, row.opponent_id);
+    }
+  }
   const progress = await achievementProgress(userId, {
     won: result === 'won',
     opponentId: row.opponent_id,
@@ -1173,12 +1185,13 @@ function unlockedModesFrom(clearedByMode: Record<BattleMode, string[]>): BattleM
   const modes: BattleMode[] = ['normal'];
   if (clearedByMode.normal.length === OPPONENTS.length) modes.push('hard');
   if (clearedByMode.hard.length === OPPONENTS.length) modes.push('chaos');
+  if (clearedByMode.chaos.length === OPPONENTS.length) modes.push('extreme');
   return modes;
 }
 
 async function unlockedModesFor(userId: string): Promise<BattleMode[]> {
   const claims = await progressClaims(userId, kstDate(new Date()));
-  const clearedByMode: Record<BattleMode, string[]> = { normal: [], hard: [], chaos: [] };
+  const clearedByMode: Record<BattleMode, string[]> = { normal: [], hard: [], chaos: [], extreme: [] };
   for (const mode of BATTLE_MODES) {
     clearedByMode[mode] = OPPONENTS.filter((opponent) => claims.has(pveFirstClearClaimKey(opponent.id, mode))).map(
       (opponent) => opponent.id

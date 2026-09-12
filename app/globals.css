@@ -15,6 +15,23 @@
   color-scheme: light;
   font-optical-sizing: auto;
 }
+html { transition: background-color .35s ease, color .35s ease; }
+html[data-extreme] {
+  color-scheme: dark;
+  --bg: #100c09;
+  --paper: #1b1510;
+  --ink: #f3ead7;
+  --secondary: #cbb896;
+  --muted: #a89474;
+  --line: #3a2f22;
+  --accent: #d7b45a;
+  --accent-dark: #c49a3a;
+  --accent-wash: #2a2116;
+  --focus: #e8d5a3;
+}
+@media (prefers-reduced-transparency: reduce) {
+  html[data-extreme] { --paper: #16110c; --bg: #0c0a08; }
+}
 * { box-sizing: border-box; }
 .app-shell { position: relative; }
 html { min-width: 320px; background: var(--bg); scrollbar-gutter: stable; scroll-padding-top: 7rem; scroll-padding-bottom: 6.5rem; }
