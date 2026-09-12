@@ -237,7 +237,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
   const [rewardChoice, setRewardChoice] = useState<TicketType | null>(null);
   const [starting, setStarting] = useState(false);
   const [setup, setSetup] = useState<BattleSetupResponse | null>(null);
-  const extremeOn = mode === 'extreme' || setup?.mode === 'extreme';
+  const extremeOn = (phase === 'battle' ? setup?.mode : mode) === 'extreme';
   useEffect(() => {
     if (extremeOn) document.documentElement.dataset.extreme = 'true';
     else delete document.documentElement.dataset.extreme;
