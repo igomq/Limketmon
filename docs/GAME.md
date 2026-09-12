@@ -202,5 +202,6 @@ final       = max(1, round(base × variance × element × crit))
 동일 전투의 재정산과 동시 정산은 한 번만 지급합니다. 구체적인 15개 구간의 수량과 종류는 [카드 성장 규칙](CARD_GROWTH.md)을 참조합니다.
 
 공개 쿠폰 `LIMKETMON`은 SSR 이상 1장·보통 10장·하급 50장,
-`LIMKETMON_SR_100P`는 SR 이상 20장, `LIMKETMON_SSR_100P`는 SSR 이상 20장을 지급합니다.
+`LIMKETMON_SR_100P`는 SR 이상 20장, `LIMKETMON_SSR_100P`는 SSR 이상 20장,
+`HANNAMSPECIAL`은 SR 이상 10장·보통 20장·하급 50장을 지급합니다.
 대소문자를 가리지 않고 계정당 한 번 사용할 수 있습니다.

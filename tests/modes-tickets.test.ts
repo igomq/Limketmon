@@ -149,6 +149,13 @@ test('coupon codes grant their fixed bundles, once, case-insensitively', async (
   assert.deepEqual(ssr.granted, { credits: 0, low: 0, sr: 0, ssr: 20 });
   assert.equal(ssr.snapshot.tickets.ssr, 21);
   await assert.rejects(game.redeemCoupon(USER, 'nope'), /유효하지 않은/);
+
+  const hannam = await game.redeemCoupon(USER, ' hannamspecial ');
+  assert.deepEqual(hannam.granted, { credits: 20, low: 50, sr: 10, ssr: 0 });
+  assert.equal(hannam.snapshot.credits, 30);
+  assert.equal(hannam.snapshot.tickets.low, 100);
+  assert.equal(hannam.snapshot.tickets.sr, 30);
+  await assert.rejects(game.redeemCoupon(USER, 'HANNAMSPECIAL'), /이미 사용한 쿠폰/);
 });
 
 test('the win ticket is fixed per mode and opponent', () => {

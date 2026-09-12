@@ -353,7 +353,8 @@ export interface CouponGrant {
 const COUPONS: Record<string, CouponGrant> = {
   LIMKETMON: { credits: 10, low: 50, sr: 0, ssr: 1 },
   LIMKETMON_SR_100P: { credits: 0, low: 0, sr: 20, ssr: 0 },
-  LIMKETMON_SSR_100P: { credits: 0, low: 0, sr: 0, ssr: 20 }
+  LIMKETMON_SSR_100P: { credits: 0, low: 0, sr: 0, ssr: 20 },
+  HANNAMSPECIAL: { credits: 20, low: 50, sr: 10, ssr: 0 }
 };
 
 /** Repeatable server-only test coupon. The code lives in the runtime secret, never the client. */
