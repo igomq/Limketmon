@@ -13,8 +13,9 @@ import { traitValue, type Trait, type TraitId } from '../progression.ts';
  *    2-round element link. A row stored under 4 or earlier is refused (see lib/game.ts)
  *    instead of re-simulated with rules it was never played under.
  * 6: extreme mode, grown opponent loadouts, retuned hard/chaos scale.
+ * 7: hard/chaos difficulty pulled back; chaos ace+ loadouts no longer jump rarity.
  */
-export const BATTLE_RULESET_VERSION = 6;
+export const BATTLE_RULESET_VERSION = 7;
 
 export const BATTLE_MODES = ['normal', 'hard', 'chaos', 'extreme'] as const;
 export type BattleMode = (typeof BATTLE_MODES)[number];

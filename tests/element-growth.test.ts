@@ -488,15 +488,15 @@ test('opponents: ace and boss scale up, hard boss is pulled back, chaos general 
   assert.ok(Math.abs(opponentById('boss', 'normal')!.statScale! - 1.06 * 1.2) < 1e-9);
   assert.ok(Math.abs(opponentById('ace', 'normal')!.hpScale - 1.15 * 1.18) < 1e-9);
   for (const id of ['rookie', 'regular', 'veteran', 'ace']) {
-    assert.ok(Math.abs(opponentById(id, 'hard')!.statScale! - 1.62 * 1.15) < 1e-9, id);
+    assert.ok(Math.abs(opponentById(id, 'hard')!.statScale! - 1.52 * 1.15) < 1e-9, id);
   }
-  assert.ok(Math.abs(opponentById('boss', 'hard')!.statScale! - 1.62 * 0.92) < 1e-9);
+  assert.ok(Math.abs(opponentById('boss', 'hard')!.statScale! - 1.52 * 0.92) < 1e-9);
   // Hard is still harder than normal overall, but the boss is pulled back relative to hard's ace.
   assert.ok(opponentById('boss', 'hard')!.statScale! < opponentById('ace', 'hard')!.statScale!);
   assert.ok(opponentById('boss', 'hard')!.statScale! > opponentById('boss', 'normal')!.statScale!);
-  assert.ok(Math.abs(opponentById('boss', 'hard')!.hpScale - 1.25 * 1.62 * 0.92) < 1e-9);
-  assert.ok(Math.abs(opponentById('rookie', 'chaos')!.statScale! - 2.18 * 1.1) < 1e-9);
-  assert.ok(Math.abs(opponentById('boss', 'chaos')!.statScale! - 2.18 * 1.04) < 1e-9);
+  assert.ok(Math.abs(opponentById('boss', 'hard')!.hpScale - 1.25 * 1.52 * 0.92) < 1e-9);
+  assert.ok(Math.abs(opponentById('rookie', 'chaos')!.statScale! - 1.88 * 1.04) < 1e-9);
+  assert.ok(Math.abs(opponentById('boss', 'chaos')!.statScale! - 1.88 * 1.02) < 1e-9);
   assert.ok(opponentById('rookie', 'chaos')!.statScale! > opponentById('boss', 'chaos')!.statScale!);
 });
 
@@ -548,7 +548,7 @@ test('replay: the same setup and decisions reproduce a battle byte for byte', ()
   assert.equal(project(replayed.state), project(first.state));
   assert.deepEqual(replayed.events, first.events);
   assert.equal(replayed.state.ruleset, BATTLE_RULESET_VERSION);
-  assert.equal(BATTLE_RULESET_VERSION, 6);
+  assert.equal(BATTLE_RULESET_VERSION, 7);
 });
 
 // ---------------------------------------------------------------------------

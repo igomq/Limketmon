@@ -33,8 +33,8 @@ interface ModeTuning {
 /** Mode difficulty rides on top of the base ladder: scaling HP, ATK/DEF, and AI aggression. */
 const MODE_TUNING: Record<BattleMode, ModeTuning> = {
   normal: { hp: 1, stat: 1.06, heal: 0.95, appetite: 1.1, ruthless: false },
-  hard: { hp: 1.62, stat: 1.62, heal: 0.85, appetite: 1.25, ruthless: true },
-  chaos: { hp: 2.18, stat: 2.18, heal: 0.7, appetite: 1.4, ruthless: true },
+  hard: { hp: 1.52, stat: 1.52, heal: 0.88, appetite: 1.18, ruthless: true },
+  chaos: { hp: 1.88, stat: 1.88, heal: 0.78, appetite: 1.28, ruthless: true },
   extreme: { hp: 2.75, stat: 2.75, heal: 0.62, appetite: 1.5, ruthless: true }
 };
 
@@ -47,7 +47,7 @@ const MODE_TUNING: Record<BattleMode, ModeTuning> = {
 const MODE_OPPONENT_DELTA: Record<BattleMode, Record<string, number>> = {
   normal: { ace: 1.18, boss: 1.2 },
   hard: { rookie: 1.15, regular: 1.15, veteran: 1.15, ace: 1.15, boss: 0.92 },
-  chaos: { rookie: 1.1, regular: 1.1, veteran: 1.1, ace: 1.1, boss: 1.04 },
+  chaos: { rookie: 1.04, regular: 1.04, veteran: 1.04, ace: 1.06, boss: 1.02 },
   extreme: { rookie: 1, regular: 1.04, veteran: 1.08, ace: 1.12, boss: 1.18 }
 };
 
@@ -59,18 +59,18 @@ const unit = (cardId: string, enhance: number, rarity?: Rarity, traits: Trait[] 
 /** Grown, shuffled teams for the harder modes. Normal keeps the curated catalog trio. */
 const MODE_LOADOUTS: Partial<Record<BattleMode, Record<string, OpponentLoadout[]>>> = {
   hard: {
-    rookie: [unit('imsingyu-v010', 2), unit('imsingyu-v022', 2), unit('imsingyu-v004', 3)],
-    regular: [unit('imsingyu-v016', 4), unit('imsingyu-v009', 4), unit('imsingyu-v014', 5)],
-    veteran: [unit('imsingyu-v018', 6, 'SR', [trait('damage', 6)]), unit('imsingyu-v025', 5), unit('imsingyu-v039', 5)],
-    ace: [unit('imsingyu-v020', 8, 'SR', [trait('damage', 8)]), unit('imsingyu-v045', 7), unit('imsingyu-v008', 7, 'R', [trait('resist_fire', 5)])],
-    boss: [unit('imsingyu-v033', 8, 'UR', [trait('damage', 10)]), unit('imsingyu-v041', 7, 'SSR', [trait('synergy', 8)]), unit('imsingyu-v006', 7)]
+    rookie: [unit('imsingyu-v010', 1), unit('imsingyu-v022', 1), unit('imsingyu-v004', 2)],
+    regular: [unit('imsingyu-v016', 2), unit('imsingyu-v009', 2), unit('imsingyu-v014', 3)],
+    veteran: [unit('imsingyu-v018', 3), unit('imsingyu-v025', 3), unit('imsingyu-v039', 3)],
+    ace: [unit('imsingyu-v020', 4, 'SR', [trait('damage', 4)]), unit('imsingyu-v045', 4), unit('imsingyu-v008', 4)],
+    boss: [unit('imsingyu-v033', 5, 'UR', [trait('damage', 5)]), unit('imsingyu-v041', 5), unit('imsingyu-v006', 4)]
   },
   chaos: {
-    rookie: [unit('imsingyu-v021', 6), unit('imsingyu-v034', 6), unit('imsingyu-v044', 7)],
-    regular: [unit('imsingyu-v017', 8), unit('imsingyu-v025', 8, 'R', [trait('resist_water', 8)]), unit('imsingyu-v007', 8)],
-    veteran: [unit('imsingyu-v029', 10, 'SR', [trait('damage', 10)]), unit('imsingyu-v042', 9), unit('imsingyu-v014', 10, 'SR')],
-    ace: [unit('imsingyu-v032', 12, 'SSR', [trait('damage', 12)]), unit('imsingyu-v018', 11, 'SR', [trait('synergy', 10)]), unit('imsingyu-v041', 10)],
-    boss: [unit('imsingyu-v033', 12, 'UR', [trait('damage', 12), trait('synergy', 8)]), unit('imsingyu-v028', 12, 'UR'), unit('imsingyu-v046', 11, 'SSR', [trait('resist_dark', 10)])]
+    rookie: [unit('imsingyu-v021', 3), unit('imsingyu-v034', 3), unit('imsingyu-v044', 3)],
+    regular: [unit('imsingyu-v017', 4), unit('imsingyu-v025', 4), unit('imsingyu-v007', 4)],
+    veteran: [unit('imsingyu-v029', 5, 'SR', [trait('damage', 4)]), unit('imsingyu-v042', 5), unit('imsingyu-v014', 5)],
+    ace: [unit('imsingyu-v032', 6, 'SR', [trait('damage', 5)]), unit('imsingyu-v018', 6), unit('imsingyu-v041', 5)],
+    boss: [unit('imsingyu-v033', 7, 'UR', [trait('damage', 6)]), unit('imsingyu-v028', 6), unit('imsingyu-v046', 6)]
   },
   extreme: {
     rookie: [unit('imsingyu-v023', 8, 'R'), unit('imsingyu-v038', 8), unit('imsingyu-v004', 9, 'R', [trait('damage', 8)])],
