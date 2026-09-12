@@ -6,6 +6,8 @@ import type { Rarity } from '../rules.ts';
 import type { Card } from '../cards.ts';
 import {
   positionOf,
+  type Ability,
+  type AbilityOp,
   type BattleKind,
   type BattleMode,
   type BattleModifier,
@@ -61,10 +63,10 @@ export function combatantSeed(cardId: string, hpScale = 1, enhanceLevel = 0, pro
   const base = applyEnhance(battleStats(card), level, card.rarity);
   // The raw signature was tuned against un-normalized stats; scale its flat numbers so a high
   // rarity or a high enhance level keeps the signature relevant next to the card's own stats.
-  const signature = scaleAbility(base.ability, card.rarity, level, catalogCard(card).rarity);
+  const signature = boostSupport(scaleAbility(base.ability, card.rarity, level, catalogCard(card).rarity));
   const position = positionOf(signature);
   const stats = applyRole({ ...base, ability: signature }, position);
-  const skills = unlockedEnhanceSkills(card, stats, level).map((skill) => skill.ability);
+  const skills = unlockedEnhanceSkills(card, stats, level).map((skill) => boostSupport(skill.ability));
   return {
     cardId: card.id,
     name: card.skillName ? card.alias?.replace(/[「」]/g, '') || card.name : card.name,
@@ -168,4 +170,15 @@ export function aiProfileFor(opponentId: string, mode: BattleMode = 'normal') {
   const opponent = opponentById(opponentId, mode);
   if (!opponent) throw new SetupError(`unknown opponent: ${opponentId}`);
   return opponent.profile;
+}
+
+/** Apply the same modest support buff to signature and unlocked skills on either side. */
+export function boostSupport(ability: Ability): Ability {
+  const ops = (values: AbilityOp[]): AbilityOp[] => values.map((op) => {
+    if (op.op === 'heal' || op.op === 'shield') return { ...op, amount: Math.round(op.amount * 1.1) };
+    if (op.op === 'conditional') return { ...op, then: ops(op.then) };
+    if (op.op === 'apply_status' && op.status === 'regen') return { ...op, value: Math.round((op.value ?? 0) * 1.1) };
+    return op;
+  });
+  return { ...ability, ops: ops(ability.ops) };
 }

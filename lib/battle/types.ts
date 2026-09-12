@@ -16,7 +16,7 @@ import { traitValue, type Trait, type TraitId } from '../progression.ts';
  * 7: hard/chaos difficulty pulled back; chaos ace+ loadouts no longer jump rarity.
  * 8: durability retune (more HP/DEF, less ATK) and hard-boss below chaos-regular.
  */
-export const BATTLE_RULESET_VERSION = 8;
+export const BATTLE_RULESET_VERSION = 9;
 
 export const BATTLE_MODES = ['normal', 'hard', 'chaos', 'extreme'] as const;
 export type BattleMode = (typeof BATTLE_MODES)[number];

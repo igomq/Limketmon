@@ -1,3 +1,4 @@
+import { boostSupport } from '../lib/battle/setup.ts';
 // Enhancement skills: the +5 / +10 / +15 unlocks, their DSL, and the engine/decision rules that
 // make a chosen skill replayable. Pure modules only, no database.
 import assert from 'node:assert/strict';
@@ -118,7 +119,7 @@ test('enhance skills: seeds carry the unlocks and a signature scaled to the card
   for (const level of [0, 5, 10, 15]) {
     const seed = combatantSeed(card.id, 1, level);
     assert.equal(seed.ability.id, raw.id, `${card.id} +${level}`);
-    assert.deepEqual(seed.ability.ops, scaleAbility(raw, card.rarity, level).ops);
+    assert.deepEqual(seed.ability.ops, boostSupport(scaleAbility(raw, card.rarity, level)).ops);
   }
   // Opponents never unlock skills, so the shared AI can never diverge from the client.
   const opponent = buildSetup({ kind: 'pve', opponentId: 'rookie', modifier: { kind: 'none' }, seed: 1, playerCardIds: CARD_IDS.slice(0, 3), playerEnhance: [15, 15, 15] });

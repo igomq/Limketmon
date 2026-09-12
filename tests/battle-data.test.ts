@@ -49,7 +49,7 @@ test('stats: rarity-normalized derivation matches the documented power anchors',
 });
 
 test('stats: ability identity is stable and keeps the curated Korean copy', () => {
-  assert.equal(STAT_RULESET, 5);
+  assert.equal(STAT_RULESET, 6);
   assert.equal(ABILITY_RULESET, 3);
   for (const card of cards) {
     const { ability } = battleStats(card);

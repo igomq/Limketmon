@@ -7,14 +7,14 @@ import { ELEMENTS, type CardBattleStats, type Element } from './types.ts';
 import { enhancePower } from '../enhance.ts';
 import manifest from '../data/cards.curated.json';
 
-export const STAT_RULESET = 5;
+export const STAT_RULESET = 6;
 
 /** Base cards sit at 70% of catalog attack/defense so enhance has room to climb. */
 const BASE_STAT_SCALE = 0.7;
 /** Fights were ending in a few hits; HP/DEF go up, ATK goes down. */
 const HP_MULT = 1.22;
-const ATK_MULT = 0.84;
-const DEF_MULT = 1.16;
+const ATK_MULT = 1.0;
+const DEF_MULT = 1.06;
 
 /**
  * Normalized power anchor for N at level 0, in the HP + 2*ATK + DEF unit. Kept near the old N band

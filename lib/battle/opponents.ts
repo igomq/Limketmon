@@ -36,7 +36,7 @@ const MODE_TUNING: Record<BattleMode, ModeTuning> = {
   normal: { hp: 1.12, atk: 1.06, def: 1.18, heal: 0.95, appetite: 1.1, ruthless: false },
   hard: { hp: 1.85, atk: 1.4, def: 1.72, heal: 0.88, appetite: 1.18, ruthless: true },
   chaos: { hp: 2.4, atk: 1.55, def: 2.15, heal: 0.78, appetite: 1.28, ruthless: true },
-  extreme: { hp: 3.25, atk: 2.2, def: 3.0, heal: 0.62, appetite: 1.5, ruthless: true }
+  extreme: { hp: 1.9, atk: 0.95, def: 1.1, heal: 0.62, appetite: 1.5, ruthless: true }
 };
 
 /**
@@ -78,7 +78,7 @@ const MODE_LOADOUTS: Partial<Record<BattleMode, Record<string, OpponentLoadout[]
     regular: [unit('imsingyu-v013', 10, 'SR'), unit('imsingyu-v016', 10, 'SR'), unit('imsingyu-v009', 11, 'R', [trait('synergy', 10)])],
     veteran: [unit('imsingyu-v001', 12, 'SSR', [trait('damage', 12)]), unit('imsingyu-v027', 12, 'SSR'), unit('imsingyu-v030', 12, 'SR', [trait('resist_earth', 10)])],
     ace: [unit('imsingyu-v020', 14, 'UR', [trait('damage', 14, true)]), unit('imsingyu-v006', 13, 'UR', [trait('synergy', 12)]), unit('imsingyu-v045', 14, 'SSR')],
-    boss: [unit('imsingyu-v033', 15, 'XR', [trait('damage', 15, true), trait('synergy', 12)]), unit('imsingyu-v041', 15, 'UR', [trait('resist_fire', 14, true)]), unit('imsingyu-v028', 15, 'UR', [trait('damage', 14)])]
+    boss: [unit('imsingyu-v033', 13, 'XR', [trait('damage', 10), trait('synergy', 8)]), unit('imsingyu-v041', 13, 'UR', [trait('resist_fire', 12, true)]), unit('imsingyu-v028', 13, 'UR', [trait('damage', 10)])]
   }
 };
 

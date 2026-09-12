@@ -111,7 +111,7 @@ target 종류: `enemy_active`, `enemy_lowest_hp`, `enemy_all`, `self`, `ally_low
 ```text
 attackValue = 기본 공격이면 effectiveStat(attacker, 'atk'), 스킬이면 op.power
 boost       = element_boost 규칙이 공격자 속성과 맞으면 1 + bonus, 아니면 1
-base        = max(1, attackValue × boost − effectiveStat(defender, 'def') × 0.55)
+base        = max(1, attackValue × boost − effectiveStat(defender, 'def') × 0.45)
 variance    = 0.9 + draw1 × 0.2          (첫 번째 난수)
 element     = 링 상대가 다음 속성이면 1.25, 이전 속성이면 0.8, 그 외 1.0
 crit        = draw2 × 100 < attacker.crit ? 1.6 : 1.0   (두 번째 난수)

@@ -1,3 +1,4 @@
+import { boostSupport } from '../lib/battle/setup.ts';
 // Element combat, member positions, owned-card traits, transcendence (XR), opponent tuning and
 // snapshot replay. Pure contracts: every fixture is hand-built or comes from the curated manifest,
 // so the file needs no server, database or network.
@@ -359,7 +360,7 @@ test('positions: ops decide the role, Korean labels match, all four roles exist'
   const seen = new Set<string>();
   for (const card of cards) {
     const base = battleStats(card);
-    const signature = scaleAbility(base.ability, card.rarity, 0);
+    const signature = boostSupport(scaleAbility(base.ability, card.rarity, 0));
     const seed = combatantSeed(card.id);
     assert.ok(seed.position, card.id);
     seen.add(seed.position);
@@ -548,7 +549,7 @@ test('replay: the same setup and decisions reproduce a battle byte for byte', ()
   assert.equal(project(replayed.state), project(first.state));
   assert.deepEqual(replayed.events, first.events);
   assert.equal(replayed.state.ruleset, BATTLE_RULESET_VERSION);
-  assert.equal(BATTLE_RULESET_VERSION, 8);
+  assert.equal(BATTLE_RULESET_VERSION, 9);
 });
 
 // ---------------------------------------------------------------------------
