@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getChatGPTUser } from '../../chatgpt-auth';
-import { ensureUser, finishBattle, GameError, replayBattle, startBattle } from '../../../lib/game';
+import { ensureUser, finishBattle, GameError, replayBattle, startBattle, sweepBattle } from '../../../lib/game';
 
 // The server owns the seed, the deck snapshot, the opponent and the rewards. The client only
 // sends a deck id plus the action log it played, which is re-simulated before anything is paid.
@@ -12,9 +12,15 @@ export async function POST(request: Request) {
     if (!body || typeof body !== 'object' || Array.isArray(body) || !('action' in body)) {
       return NextResponse.json({ error: '요청을 확인해주세요.' }, { status: 400 });
     }
-    const payload = body as { action?: unknown; deckId?: unknown; opponentId?: unknown; kind?: unknown; mode?: unknown; battleId?: unknown; decisions?: unknown; rewardTicketType?: unknown };
+    const payload = body as { action?: unknown; deckId?: unknown; opponentId?: unknown; kind?: unknown; mode?: unknown; battleId?: unknown; decisions?: unknown; rewardTicketType?: unknown; count?: unknown; requestId?: unknown; material?: unknown };
     await ensureUser(user.userId, user.email);
     switch (payload.action) {
+      case 'sweep': {
+        if (payload.kind !== undefined && payload.kind !== 'pve') {
+          return NextResponse.json({ error: '소탕은 일반 대련에서만 사용할 수 있어요.' }, { status: 400 });
+        }
+        return NextResponse.json({ sweep: await sweepBattle(user.userId, payload) });
+      }
       case 'start': {
         const setup = await startBattle(user.userId, {
           deckId: payload.deckId,

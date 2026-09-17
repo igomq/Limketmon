@@ -3,6 +3,19 @@ import { dailyClaimKey, DAILY_REWARD_CREDITS } from './daily.ts';
 import type { BattleMode } from './battle/types.ts';
 import type { TicketType } from './pull.ts';
 
+export const MAX_SWEEP_COUNT = 100;
+export const SWEEP_COST: Record<BattleMode, { material: 'proof' | 'fragments'; quantity: number; label: string }> = {
+  normal: { material: 'proof', quantity: 1, label: '임신의 증거' },
+  hard: { material: 'proof', quantity: 4, label: '임신의 증거' },
+  chaos: { material: 'proof', quantity: 10, label: '임신의 증거' },
+  extreme: { material: 'fragments', quantity: 2, label: '쌍둥이 임신의 증거 파편' }
+};
+export const EXTREME_PROOF_SWEEP_COST = { material: 'proof', quantity: 30, label: '임신의 증거' } as const;
+
+export function sweepCost(mode: BattleMode, material?: 'proof' | 'fragments') {
+  return mode === 'extreme' && material === 'proof' ? EXTREME_PROOF_SWEEP_COST : SWEEP_COST[mode];
+}
+
 export interface BattleRewardInput {
   kind: 'pve' | 'daily';
   opponentId: string;

@@ -114,6 +114,17 @@
 .opponent-reward { display: flex; align-items: center; gap: .35rem; font-size: .75rem; color: var(--muted); }
 .opponent-reward .icon { width: .9rem; height: .9rem; color: var(--accent); }
 .opponent-card .btn { justify-content: space-between; min-height: 3rem; }
+.opponent-actions { display: grid; gap: .5rem; }
+.opponent-actions[data-cleared="true"] { grid-template-columns: minmax(0, 3fr) minmax(3.5rem, 1fr); }
+.opponent-actions .btn { min-width: 0; padding-inline: .75rem; }
+.opponent-actions .btn + .btn { justify-content: center; }
+.sweep-panel { display: grid; gap: .65rem; margin-top: .5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.sweep-panel p { font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.sweep-panel label { display: grid; gap: .35rem; font-size: .8rem; }
+.sweep-panel input, .sweep-panel select { width: 100%; min-width: 0; min-height: 2.75rem; padding: .5rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--paper); color: var(--ink); font: inherit; font-size: 1rem; }
+.sweep-presets { display: flex; gap: .5rem; }
+.sweep-presets button { flex: 1; min-height: 2.75rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--paper); color: var(--ink); }
+.sweep-presets button[aria-pressed="true"] { border-color: var(--ink); font-weight: 700; }
 .difficulty { flex: 0 0 auto; padding: .2rem .55rem; border: 1px solid var(--line); border-radius: 2rem; font-size: .75rem; font-weight: 650; white-space: nowrap; }
 .opponent-card.is-daily { margin-bottom: 1rem; border-color: var(--accent); background: linear-gradient(180deg, var(--accent-wash), var(--paper) 65%); }
 .daily-done { display: flex; align-items: center; gap: .45rem; margin-bottom: 1rem; padding: .8rem 1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--paper); font-size: .8125rem; color: var(--secondary); }

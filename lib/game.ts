@@ -9,7 +9,7 @@ import { InsufficientTickets, savePull, type TicketType } from './pull';
 import { DECK_SIZE, MAX_DECKS, normalizeDeckName, validateDeck } from './decks';
 import { dailyChallenge, dailyClaimKey, type DailyChallenge } from './daily';
 import { ACHIEVEMENTS, achievementById, achievementClaimKey, evaluateAchievements, type AchievementProgress } from './achievements';
-import { planBattleRewards, pveFirstClearClaimKey, victoryTicketReward, extremeFragmentReward } from './rewards';
+import { planBattleRewards, pveFirstClearClaimKey, victoryTicketReward, extremeFragmentReward, sweepCost, MAX_SWEEP_COUNT } from './rewards';
 import { summarizeBattles, type BattleRow } from './stats';
 import { buildSetup, CARD_BY_ID } from './battle/setup';
 import { battleStats } from './battle/stats';
@@ -18,7 +18,7 @@ import { BATTLE_MODES, BATTLE_RULESET_VERSION, type BattleEvent, type BattleMode
 import { MODE_LABELS, OPPONENTS, opponentById } from './battle/opponents';
 import { aiDecision } from './battle/ai';
 import { runBattle } from './battle/simulate';
-import type { BattleResultSummary, BattleSetupResponse, BattleSummaryRow, DailyChallengeSummary, DeckSummary, RewardLine, StatsSummary } from './battle/api';
+import type { BattleResultSummary, BattleSetupResponse, BattleSummaryRow, DailyChallengeSummary, DeckSummary, RewardLine, StatsSummary, SweepResult } from './battle/api';
 
 export type { Card } from './cards';
 
@@ -128,8 +128,8 @@ export async function ensureUser(userId: string, email: string): Promise<void> {
       WHERE users.email != excluded.email
     `).bind(userId, email, now, now),
     db.prepare(`
-      INSERT INTO user_game_state (user_id, pull_credits, last_free_pull_date, sr_tickets, ssr_tickets)
-      VALUES (?, 0, NULL, 0, 0)
+      INSERT INTO user_game_state (user_id, pull_credits, last_free_pull_date, low_tickets, sr_tickets, ssr_tickets)
+      VALUES (?, 0, NULL, 3, 0, 0)
       ON CONFLICT(user_id) DO NOTHING
     `).bind(userId)
   ]);
@@ -822,6 +822,67 @@ function setupFromRow(row: BattleRowFull) {
 /** Stored mode strings are untrusted: anything unknown falls back to normal. */
 function parseMode(raw: unknown): BattleMode {
   return BATTLE_MODES.includes(raw as BattleMode) ? (raw as BattleMode) : 'normal';
+}
+
+/** A sweep pays repeat-win tickets only; fragments remain a reward for playing Extreme battles. */
+export async function sweepBattle(userId: string, input: {
+  opponentId?: unknown; mode?: unknown; count?: unknown; requestId?: unknown; rewardTicketType?: unknown; material?: unknown;
+}): Promise<SweepResult> {
+  if (!BATTLE_MODES.includes(input.mode as BattleMode)) throw new GameError('invalid_mode', '난이도를 선택해주세요.');
+  const mode = input.mode as BattleMode;
+  if (typeof input.opponentId !== 'string' || !OPPONENTS.some((opponent) => opponent.id === input.opponentId)) {
+    throw new GameError('invalid_opponent', '상대를 선택해주세요.');
+  }
+  if (typeof input.count !== 'number' || !Number.isSafeInteger(input.count) || input.count < 1 || input.count > MAX_SWEEP_COUNT) {
+    throw new GameError('invalid_count', `소탕 횟수는 1~${MAX_SWEEP_COUNT}회로 입력해주세요.`);
+  }
+  if (typeof input.requestId !== 'string' || !/^[a-zA-Z0-9-]{16,64}$/.test(input.requestId)) {
+    throw new GameError('invalid_request', '소탕 요청을 다시 확인해주세요.');
+  }
+  if (mode === 'extreme' && (typeof input.rewardTicketType !== 'string' || !['low', 'normal', 'sr', 'ssr'].includes(input.rewardTicketType))) {
+    throw new GameError('reward_choice', '보상을 선택해주세요.');
+  }
+  const ticket = victoryTicketReward(mode, input.opponentId, input.rewardTicketType as TicketType);
+  if (input.material !== undefined && input.material !== 'proof' && !(mode === 'extreme' && input.material === 'fragments')) {
+    throw new GameError('invalid_material', '소탕에 사용할 재료를 선택해주세요.');
+  }
+  const rule = sweepCost(mode, input.material as 'proof' | 'fragments' | undefined);
+  const cost = rule.quantity * input.count;
+  const result: SweepResult = { count: input.count, cost, ticketType: ticket.ticketType, quantity: ticket.quantity * input.count };
+  const db = getDatabase();
+  const key = `sweep:${input.requestId}`;
+  const signature = `sweep:${mode}:${input.opponentId}:${input.count}:${ticket.ticketType}:${rule.material}`;
+  const receipt = async () => {
+    const row = await db.prepare('SELECT battle_id, ticket_type, ticket_quantity FROM reward_claims WHERE user_id = ? AND claim_key = ?')
+      .bind(userId, key).first<{ battle_id: string; ticket_type: TicketType; ticket_quantity: number }>();
+    if (!row) return null;
+    if (row.battle_id !== signature) throw new GameError('request_conflict', '이미 처리한 요청입니다. 소탕을 다시 열어주세요.');
+    return { ...result, ticketType: row.ticket_type, quantity: row.ticket_quantity };
+  };
+  const previous = await receipt();
+  if (previous) return previous;
+  const column = { low: 'low_tickets', normal: 'pull_credits', sr: 'sr_tickets', ssr: 'ssr_tickets' }[ticket.ticketType];
+  try {
+    const writes = await db.batch([
+      // Both eligibility and balance are checked in the debit itself, including after a reset.
+      db.prepare(`UPDATE user_game_state SET ${rule.material} = ${rule.material} - ?, ${column} = ${column} + ?
+        WHERE user_id = ? AND ${rule.material} >= ? AND EXISTS (
+          SELECT 1 FROM reward_claims WHERE user_id = ? AND claim_key = ?
+        )`).bind(cost, result.quantity, userId, cost, userId, pveFirstClearClaimKey(input.opponentId, mode)),
+      db.prepare(`INSERT INTO reward_claims (user_id, claim_key, credits, ticket_type, ticket_quantity, battle_id, claimed_at)
+        SELECT ?, ?, 0, ?, ?, ?, ? WHERE changes() = 1`)
+        .bind(userId, key, ticket.ticketType, result.quantity, signature, new Date().toISOString())
+    ]);
+    if (!Number(writes[0]?.meta?.changes)) {
+      throw new GameError('sweep_unavailable', `해당 난이도에서 먼저 격파하고 ${rule.label} ${cost}개를 준비해주세요.`);
+    }
+  } catch (error) {
+    // A duplicate receipt aborts the entire batch, including the debit, before we answer it.
+    const committed = await receipt();
+    if (committed) return committed;
+    throw error;
+  }
+  return result;
 }
 
 /**

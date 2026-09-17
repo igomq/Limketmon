@@ -27,6 +27,8 @@ let sequence = 0;
 async function user() {
   const id = `storage-${++sequence}`;
   await game.ensureUser(id, `${id}@local.invalid`);
+  // These tests measure operation payouts independently of the new-account gift.
+  db.prepare('UPDATE user_game_state SET low_tickets = 0 WHERE user_id = ?').bind(id).run();
   // Suppress automatic starter creation so consumption tests control their decks explicitly.
   db.prepare("INSERT INTO decks VALUES (?, ?, 'test', 1, 'now', 'now')").bind(id, id).run();
   return id;
@@ -308,6 +310,11 @@ test('all 15 victory tiers pay first/repeat exact receipts; concurrent finish is
     const column={low:'low_tickets',normal:'pull_credits',sr:'sr_tickets',ssr:'ssr_tickets'}[type];
     const creditRewards=[first,repeat].flatMap((r)=>r.rewards).reduce((s,r)=>s+r.credits,0);
     assert.equal(state(u)[column],quantity*3+(type==='normal'?creditRewards:0));
+    balances(u);
+    const beforeSweep = state(u)[column];
+    const swept = await game.sweepBattle(u, { mode, opponentId: opponent, count: 2, requestId: crypto.randomUUID() });
+    assert.equal(swept.quantity, quantity * 2, 'a verified mode-specific win unlocks its sweep');
+    assert.equal(state(u)[column], beforeSweep + quantity * 2);
   }
 });
 
@@ -487,6 +494,11 @@ test('extreme fragments commit once alongside chosen tickets and recover from ca
   const normal = await battle(u, 'normal', 'rookie');
   await game.finishBattle(u, normal.id, normal.decisions);
   assert.equal(state(u).fragments, 1);
+  balances(u, 30, 2, 0);
+  const beforeSweep = state(u).ssr_tickets;
+  await game.sweepBattle(u, { mode: 'extreme', opponentId: 'rookie', count: 1, material: 'fragments', rewardTicketType: 'ssr', requestId: crypto.randomUUID() });
+  assert.equal(state(u).ssr_tickets, beforeSweep + 1);
+  assert.equal(state(u).fragments, 0, 'verified Extreme clear unlocks sweep without refunding fragments');
 });
 
 

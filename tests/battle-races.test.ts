@@ -57,7 +57,8 @@ test('a concurrent read cannot make a committed pull fail or double-create start
   reset();
   // Three cards is exactly the moment the starter deck gets seeded, so a pull and a state read
   // can both try it at once.
-  seedOwned(db, USER, cardIdsByRarity({ N: 2 }));
+  // Seed three distinct cards: the random pull can be a duplicate and must not decide eligibility.
+  seedOwned(db, USER, cardIdsByRarity({ N: 3 }));
   // Consume the free pull first: a count-1 pull is free until today's date is recorded.
   await db.prepare('UPDATE user_game_state SET pull_credits = 20, last_free_pull_date = ? WHERE user_id = ?').bind(kstDate(new Date()), USER).run();
   const [pull, snapshot, second] = await Promise.all([

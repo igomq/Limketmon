@@ -46,6 +46,13 @@ export interface RewardLine {
   readonly fragments?: number;
 }
 
+export interface SweepResult {
+  count: number;
+  cost: number;
+  ticketType: TicketType;
+  quantity: number;
+}
+
 export interface BattleResultSummary {
   readonly result: 'won' | 'lost' | 'draw' | 'invalid';
   readonly rewards: RewardLine[];

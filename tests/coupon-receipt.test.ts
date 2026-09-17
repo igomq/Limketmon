@@ -23,6 +23,7 @@ const redemptionCount = () => db.prepare('SELECT COUNT(*) AS c FROM coupon_redem
 
 test('private test coupon repeats, grants all four tickets, and leaves inventory untouched', async () => {
   await game.ensureUser(USER, 'receipt@local.invalid');
+  const startingTickets = (await game.getSnapshot(USER)).tickets.low;
   const base = game.cards[0]!;
   const traits = [{ id: 'damage', level: 10, transcended: false }];
   db.prepare("INSERT INTO inventory (user_id,card_id,quantity,first_obtained_at,enhance_level,traits,base_card_id,rarity_override) VALUES (?,?,?,'now',?,?,?,?)")
@@ -36,7 +37,7 @@ test('private test coupon repeats, grants all four tickets, and leaves inventory
       const receipt = await game.redeemCoupon(USER, round === 1 ? CODE : ` ${CODE.toLowerCase()} `);
       assert.deepEqual(receipt.granted, { credits: 100, low: 100, sr: 100, ssr: 100 });
       assert.equal(receipt.snapshot.credits, round * 100);
-      assert.deepEqual(receipt.snapshot.tickets, { low: round * 100, sr: round * 100, ssr: round * 100 });
+      assert.deepEqual(receipt.snapshot.tickets, { low: startingTickets + round * 100, sr: round * 100, ssr: round * 100 });
       assert.equal(receipt.snapshot.inventory.length, 1);
       assert.deepEqual(ownedRow('receipt-variant'), before);
       assert.ok(!JSON.stringify(receipt).includes(CODE.toLowerCase()));

@@ -5,9 +5,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode
 import type { Card } from '../lib/cards';
 import type { Ability, AiProfile, BattleEvent, BattleKind, BattleMode, BattleModifier, BattleSetup, BattleState, Combatant, Decision } from '../lib/battle/types';
 import { ELEMENT_LABEL, STATUS_LABEL } from '../lib/battle/types';
-import type { BattleResultSummary, BattleSetupResponse, DailyChallengeSummary, DeckSummary } from '../lib/battle/api';
+import type { BattleResultSummary, BattleSetupResponse, DailyChallengeSummary, DeckSummary, SweepResult } from '../lib/battle/api';
 import { BATTLE_MODES, MODE_CREDITS_MULTIPLIER, MODE_LABELS, OPPONENTS, opponentById } from '../lib/battle/opponents';
-import { extremeRewardOptions, extremeFragmentReward } from '../lib/rewards';
+import { extremeRewardOptions, extremeFragmentReward, victoryTicketReward, sweepCost, MAX_SWEEP_COUNT } from '../lib/rewards';
 import type { TicketType } from '../lib/pull';
 import { runBattle, stepBattle } from '../lib/battle/simulate';
 import { aiDecision, deciderFor } from '../lib/battle/ai';
@@ -28,6 +28,7 @@ type BattleViewProps = {
   clearedByMode: Record<BattleMode, string[]>;
   /** Owned rows: effective card + growth state, so tiles can show +n / 포지션 / 초월. */
   inventory?: InventoryRow[];
+  materials: { proof: number; fragments: number };
   onStateChange: () => void;
   onNavigate: (tab: string) => void;
   onOpenCard: (card: Card) => void;
@@ -41,6 +42,77 @@ type LogEntry = { key: number; event: BattleEvent };
 const signInHref = `/signin-with-chatgpt?return_to=${encodeURIComponent('/#battle')}`;
 const LOG_LIMIT = 80;
 const DECK_SIZE = 3;
+
+function SweepPanel({ opponentId, mode, materials, onBusy, onStateChange, onComplete }: {
+  opponentId: string;
+  mode: BattleMode;
+  materials: { proof: number; fragments: number };
+  onBusy: (busy: boolean) => void;
+  onStateChange: () => void;
+  onComplete: (message: string) => void;
+}) {
+  const [count, setCount] = useState('1');
+  const [material, setMaterial] = useState<'proof' | 'fragments'>(mode === 'extreme' ? 'fragments' : 'proof');
+  const [choice, setChoice] = useState<TicketType>('sr');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const request = useRef<{ signature: string; id: string } | null>(null);
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const amount = Number(count);
+  const valid = Number.isSafeInteger(amount) && amount >= 1 && amount <= MAX_SWEEP_COUNT;
+  const cost = sweepCost(mode, material);
+  const total = valid ? cost.quantity * amount : 0;
+  const ticket = victoryTicketReward(mode, opponentId, choice);
+  const affordable = valid && materials[cost.material] >= total;
+
+  async function submit() {
+    if (inFlight.current || !affordable) return;
+    const signature = `${opponentId}:${mode}:${amount}:${choice}:${material}`;
+    if (request.current?.signature !== signature) request.current = { signature, id: crypto.randomUUID() };
+    inFlight.current = true;
+    setBusy(true);
+    onBusy(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/battle', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'sweep', opponentId, mode, count: amount, material, rewardTicketType: choice, requestId: request.current.id })
+      });
+      const payload = await response.json() as { sweep?: SweepResult; error?: string };
+      if (!response.ok || !payload.sweep) throw new Error(payload.error || '소탕 결과를 확인하지 못했어요. 다시 시도해주세요.');
+      onStateChange();
+      if (mounted.current) onComplete(`${MODE_LABELS[mode]} · ${opponentById(opponentId)?.name} ${payload.sweep.count}회 소탕 완료: ${TICKET_LABEL[payload.sweep.ticketType]} ${payload.sweep.quantity}장을 받았어요.`);
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : '연결을 확인한 뒤 다시 시도해주세요.');
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setBusy(false);
+      onBusy(false);
+    }
+  }
+
+  return <form id={`sweep-${opponentId}`} className="sweep-panel" onSubmit={(event) => { event.preventDefault(); void submit(); }} aria-busy={busy}>
+    <p>전투 없이 승리 뽑기권을 받아요. 첫 격파·업적·파편 보상은 제외됩니다.</p>
+    {mode === 'extreme' && <>
+      <label>소모 재료<select value={material} disabled={busy} onChange={(event) => setMaterial(event.target.value as 'proof' | 'fragments')}>
+        <option value="fragments">파편 2개 / 회 · 보유 {materials.fragments}개</option>
+        <option value="proof">임신의 증거 30개 / 회 · 보유 {materials.proof}개</option>
+      </select></label>
+      <label>받을 뽑기권<select value={choice} disabled={busy} onChange={(event) => setChoice(event.target.value as TicketType)}>
+        {Object.entries(extremeRewardOptions(opponentId) ?? {}).map(([type, quantity]) => <option key={type} value={type}>{TICKET_LABEL[type as TicketType]} {quantity}장 / 회</option>)}
+      </select></label>
+    </>}
+    <label>소탕 횟수 (1~{MAX_SWEEP_COUNT}회)<input type="number" min="1" max={MAX_SWEEP_COUNT} step="1" required value={count} disabled={busy} onChange={(event) => setCount(event.target.value)} /></label>
+    <div className="sweep-presets" role="group" aria-label="소탕 횟수 빠른 선택">{[1, 5, 10].map((value) => <button key={value} type="button" aria-pressed={amount === value} disabled={busy} onClick={() => setCount(String(value))}>{value}회</button>)}</div>
+    <p>{cost.label} <strong>{total}개</strong> 소모 · 보유 {materials[cost.material]}개</p>
+    {valid && <p>보상: {TICKET_LABEL[ticket.ticketType]} <strong>{ticket.quantity * amount}장</strong></p>}
+    {valid && !affordable && <p role="status">재료가 부족해요. 횟수를 줄이거나 재료를 모아주세요.</p>}
+    {error && <p className="feedback error" role="alert">{error}</p>}
+    <button type="submit" className="btn btn-primary" disabled={!affordable || busy}>{busy ? '소탕 중…' : error ? '소탕 다시 확인' : `${valid ? amount : 0}회 소탕하기`}</button>
+  </form>;
+}
 const DIFFICULTY_LABEL: Record<string, string> = { beginner: '입문', normal: '보통', hard: '하드', boss: '보스' };
 const RESULT_LABEL: Record<BattleState['status'], string> = { active: '진행 중', won: '승리', lost: '패배', draw: '무승부' };
 /** Shown on a locked mode chip; the requirement mirrors the server unlock rule. */
@@ -222,7 +294,7 @@ const UnitTile = memo(function UnitTile({ c, card, fx, active, reduced, progress
   );
 }, (before, after) => before.sig === after.sig && before.card === after.card && before.active === after.active && before.fx?.key === after.fx?.key && before.reduced === after.reduced && before.progress === after.progress);
 
-export function BattleView({ user, decks, cards, daily, unlockedModes, clearedByMode, inventory, onStateChange, onNavigate, onOpenCard, onError }: BattleViewProps) {
+export function BattleView({ user, decks, cards, daily, unlockedModes, clearedByMode, inventory, materials, onStateChange, onNavigate, onOpenCard, onError }: BattleViewProps) {
   const reduced = !!useReducedMotion();
   const byId = useMemo(() => new Map(cards.map((card) => [card.id, card])), [cards]);
   const rows = useMemo(() => new Map(inventory?.map((item) => [item.cardId, item]) ?? []), [inventory]);
@@ -236,6 +308,10 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
   const [mode, setMode] = useState<BattleMode>('normal');
   const [rewardChoice, setRewardChoice] = useState<TicketType | null>(null);
   const [starting, setStarting] = useState(false);
+  const [sweepTarget, setSweepTarget] = useState<string | null>(null);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepNotice, setSweepNotice] = useState<string | null>(null);
+  const selectionBusy = starting || sweeping;
   const [setup, setSetup] = useState<BattleSetupResponse | null>(null);
   const extremeOn = (phase === 'battle' ? setup?.mode : mode) === 'extreme';
   useEffect(() => {
@@ -488,7 +564,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
             {BATTLE_MODES.filter((item) => item === 'normal' || item === 'hard' || unlockedModes.includes(item)).map((item) => {
               const unlocked = unlockedModes.includes(item);
               const cleared = clearedByMode[item]?.length ?? 0;
-              return <button key={item} className="mode-chip" data-mode={item} aria-pressed={mode === item} disabled={!unlocked || starting} onClick={() => setMode(item)}>
+              return <button key={item} className="mode-chip" data-mode={item} aria-pressed={mode === item} disabled={!unlocked || selectionBusy} onClick={() => { setMode(item); setSweepTarget(null); setSweepNotice(null); }}>
                 <strong>{MODE_LABELS[item]}</strong>
                 <small>{unlocked ? `격파 ${cleared} / ${OPPONENTS.length}` : MODE_UNLOCK_HINT[item]}</small>
                 {unlocked && cleared >= OPPONENTS.length && <Icon name="check" />}
@@ -544,6 +620,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
             <h2 id="opponent-title">상대</h2>
             {!chosenLegal && <p className="deck-hint" role="status"><Icon name="clock" />출전할 덱을 먼저 정해주세요.</p>}
           </div>
+          {sweepNotice && <p className="feedback success" role="status">{sweepNotice}</p>}
           {daily && (daily.cleared ? (
             <p className="daily-done"><Icon name="check" />오늘의 도전은 완료했어요. 내일 새 규칙으로 다시 열립니다.</p>
           ) : (
@@ -557,7 +634,7 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
               </header>
               <p className="opponent-blurb">{daily.description}</p>
               <p className="opponent-reward"><Icon name="ticket" />첫 클리어 보상 {daily.rewardCredits}장 · 상대 {daily.opponentName}</p>
-              <button className="btn btn-primary" disabled={!chosenLegal || starting} onClick={() => void start(daily.opponentId, 'daily', 'normal')}>
+              <button className="btn btn-primary" disabled={!chosenLegal || selectionBusy} onClick={() => void start(daily.opponentId, 'daily', 'normal')}>
                 이 덱으로 전투<Icon name="arrow" />
               </button>
             </article>
@@ -580,9 +657,16 @@ export function BattleView({ user, decks, cards, daily, unlockedModes, clearedBy
                     </header>
                     <p className="opponent-blurb">{opponent.blurb}</p>
                     <p className="opponent-reward"><Icon name="ticket" />{mode === 'extreme' ? `승리 시 뽑기권 선택 + 쌍둥이 임신의 증거 파편 ${extremeFragmentReward(opponent.id)}개` : cleared ? '첫 보상 수령 완료 · 승리 시 확정 지급' : `${opponent.reward.label} ${opponent.reward.credits}장 · 승리 시 확정 지급`}</p>
-                    <button className="btn btn-dark" disabled={!chosenLegal || starting} onClick={() => void start(opponent.id, 'pve', mode)}>
-                      이 덱으로 전투<Icon name="arrow" />
-                    </button>
+                    <div className="opponent-actions" data-cleared={cleared}>
+                      <button className="btn btn-dark" disabled={!chosenLegal || selectionBusy} onClick={() => void start(opponent.id, 'pve', mode)}>
+                        이 덱으로 전투<Icon name="arrow" />
+                      </button>
+                      {cleared && <button id={`sweep-toggle-${opponent.id}`} className="btn btn-primary" disabled={selectionBusy} aria-expanded={sweepTarget === opponent.id} aria-controls={`sweep-${opponent.id}`} onClick={() => { setSweepTarget(sweepTarget === opponent.id ? null : opponent.id); setSweepNotice(null); }}>소탕</button>}
+                    </div>
+                    {cleared && sweepTarget === opponent.id && <SweepPanel key={`${mode}:${opponent.id}`} opponentId={opponent.id} mode={mode} materials={materials} onBusy={setSweeping} onStateChange={onStateChange} onComplete={(message) => {
+                      setSweepTarget(null); setSweepNotice(message);
+                      requestAnimationFrame(() => document.getElementById(`sweep-toggle-${opponent.id}`)?.focus());
+                    }} />}
                   </article>
                 </li>
               );

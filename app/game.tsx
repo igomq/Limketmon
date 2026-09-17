@@ -101,6 +101,7 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
   const [ticketType, setTicketType] = useState<TicketType>('normal');
   const inFlight = useRef(false);
   const mutation = useRef(0);
+  const refreshRun = useRef(0);
   const content = useRef<HTMLElement>(null);
   const inventory = useMemo(() => new Map(snapshot.inventory.map((item) => [item.cardId, item])), [snapshot.inventory]);
   const ownedCardIds = useMemo(() => snapshot.inventory.map((item) => item.cardId), [snapshot.inventory]);
@@ -118,14 +119,18 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
 
   const refresh = useCallback(async () => {
     if (!user || inFlight.current) return;
+    const run = ++refreshRun.current;
     const revision = mutation.current;
     try {
       const response = await fetch('/api/state', { cache: 'no-store' });
       if (!response.ok) return;
       const data = await response.json() as { snapshot: Snapshot };
-      if (!inFlight.current && revision === mutation.current) setSnapshot(data.snapshot);
+      if (!inFlight.current && revision === mutation.current && run === refreshRun.current) setSnapshot(data.snapshot);
     } catch { /* Keep the last confirmed snapshot; the next visit retries. */ }
   }, [user]);
+
+  // Recover a battle/sweep refresh skipped while a shared inventory mutation was in flight.
+  useEffect(() => { if (!busy) void refresh(); }, [busy, refresh]);
 
   useEffect(() => {
     const sync = () => {
@@ -308,7 +313,7 @@ function CollectionApp({ user, cards, initial }: { user: User; cards: Card[]; in
             {tab === 'collection' && <CollectionView user={user} snapshot={snapshot} cards={allCards} catalogCount={catalogCount} ownedBase={ownedBase} filter={filter} onFilter={setFilter} onOpen={setSelected} onNavigate={navigate} />}
             {tab === 'growth' && <GrowthView user={user} snapshot={snapshot} run={progression} busy={busy} onOpenCard={setSelected} />}
             {tab === 'deck' && <Suspense fallback={<ViewLoading label="덱을 불러오고 있어요." />}><DeckView user={user} decks={snapshot.decks} ownedCardIds={ownedCardIds} cards={allCards} inventory={snapshot.inventory} busy={busy} onDecksChange={handleDecks} onOpenCard={setSelected} onError={reportError} /></Suspense>}
-            {tab === 'battle' && <Suspense fallback={<ViewLoading label="대련 준비 중이에요." />}><BattleView user={user} decks={snapshot.decks} cards={allCards} daily={snapshot.daily} unlockedModes={snapshot.unlockedModes} clearedByMode={snapshot.clearedByMode} inventory={snapshot.inventory} onStateChange={refresh} onNavigate={(next) => { if (isTab(next)) navigate(next); }} onOpenCard={setSelected} onError={reportError} /></Suspense>}
+            {tab === 'battle' && <Suspense fallback={<ViewLoading label="대련 준비 중이에요." />}><BattleView user={user} decks={snapshot.decks} cards={allCards} daily={snapshot.daily} unlockedModes={snapshot.unlockedModes} clearedByMode={snapshot.clearedByMode} materials={snapshot.materials} inventory={snapshot.inventory} onStateChange={refresh} onNavigate={(next) => { if (isTab(next)) navigate(next); }} onOpenCard={setSelected} onError={reportError} /></Suspense>}
             {tab === 'stats' && <StatsView user={user} snapshot={snapshot} cards={allCards} onOpenCard={setSelected} />}
             {tab === 'coupon' && <CouponView user={user} busy={busy} feedback={feedback} onSubmit={redeem} onNavigate={navigate} onReset={reset} />}
           </motion.div>
@@ -415,6 +420,7 @@ function PullView({ user, snapshot, count, onCount, ticketType, onTicketType, bu
       </div>}
       <p className="table-hint" role="status">{busy ? <><span className="loading-dot" />카드를 가져오고 있어요…</> : results.length ? `${results.length}장 획득 · ${newCount ? `새로운 카드 ${newCount}장` : '컬렉션에 수량이 추가됐어요'}` : <><Icon name="hand" />팩을 누르면 임신규가 나옵니다. 확정입니다.</>}</p>
     </div><aside className="pack-options"><div className="available-label"><span className="live-dot" />{user && snapshot.freeAvailable ? '오늘의 무료 팩 준비 완료' : '매일 한 장, 무료로'}</div><h2>오늘은 또<br />무슨 신규?</h2><p>같은 사람 맞습니다.<br />일단 한 장 뽑아보세요.</p>
+      <p className="deck-note">처음 시작하면 하급 뽑기권 3장을 드려요. 매일 무료 카드 1장도 받을 수 있어요.</p>
       <div className="ticket-selector" role="group" aria-label="뽑기권 종류">{TICKET_TYPES.map((type) => {
         const typeBalance = ticketBalance(snapshot, type);
         const free = type === 'normal' && snapshot.freeAvailable;
